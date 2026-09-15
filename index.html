@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rinfit Ring Try-On</title>
+<meta name="description" content="Concept prototype: try Rinfit silicone rings on your own hand with the camera.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kumbh+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+} }
+</script>
+<style>
+:root{
+  --ink:#373a36; --ink-2:#6d706b; --ink-3:#9a9c97;
+  --paper:#ffffff; --warm:#e9e4e1; --warm-2:#f5f2ef; --line:#e4dfdb;
+  --black:#111111; --gold:#deae4a;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--paper);color:var(--ink);font-family:"Kumbh Sans",system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,a:focus-visible,label:focus-within{outline:2px solid var(--black);outline-offset:2px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px clamp(16px,4vw,40px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.brand b{font-weight:700;letter-spacing:.18em;text-transform:uppercase;font-size:15px}
+.brand span{font-size:14px;color:var(--ink-2)}
+.pill{font-size:11px;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--line);border-radius:999px;padding:4px 10px;color:var(--ink-2);white-space:nowrap}
+.wrap{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);gap:clamp(20px,3vw,40px);padding:clamp(16px,3vw,32px) clamp(16px,4vw,40px);max-width:1320px;margin:0 auto}
+
+/* stage */
+.stage{position:relative;background:var(--warm);border-radius:6px;overflow:hidden;aspect-ratio:4/5;max-height:82vh;width:100%;touch-action:none}
+.stage video,.stage img.photo,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.stage video,.stage img.photo{z-index:1}
+.stage img.photo{object-fit:contain}
+.stage canvas{z-index:2}
+.stage.mirror video,.stage.mirror canvas.ar{transform:scaleX(-1)}
+.modes{position:absolute;z-index:5;top:12px;left:50%;transform:translateX(-50%);display:flex;background:rgba(255,255,255,.88);backdrop-filter:blur(8px);border-radius:999px;padding:4px;gap:2px;box-shadow:0 1px 8px rgba(0,0,0,.08)}
+.modes button{border:0;background:transparent;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;white-space:nowrap}
+.modes button[aria-pressed="true"]{background:var(--black);color:#fff}
+.hint{position:absolute;z-index:5;left:50%;bottom:74px;transform:translateX(-50%);background:rgba(17,17,17,.78);color:#fff;font-size:13px;padding:8px 14px;border-radius:999px;white-space:nowrap;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis;transition:opacity .25s}
+.hint[hidden]{display:none}
+.bar{position:absolute;z-index:5;left:12px;right:12px;bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.fingers{display:flex;gap:4px;background:rgba(255,255,255,.88);backdrop-filter:blur(8px);border-radius:999px;padding:4px;overflow-x:auto}
+.fingers button{border:0;background:transparent;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:600;white-space:nowrap}
+.fingers button[aria-pressed="true"]{background:var(--warm);box-shadow:inset 0 0 0 1px var(--ink)}
+.round{width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.92);display:grid;place-items:center;box-shadow:0 1px 8px rgba(0,0,0,.1);flex:none}
+.round svg{width:20px;height:20px}
+.loader{position:absolute;z-index:6;inset:0;display:grid;place-items:center;background:rgba(233,228,225,.72);font-size:14px;font-weight:600}
+.loader[hidden]{display:none}
+
+/* panel */
+.panel{display:flex;flex-direction:column;gap:22px;min-width:0}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin:0}
+.title{font-size:clamp(22px,2.4vw,28px);font-weight:600;line-height:1.15;margin:4px 0 6px;text-wrap:balance}
+.price{font-size:18px;font-weight:500}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.link{font-size:13px;color:var(--ink);text-underline-offset:3px}
+.label{font-size:13px;font-weight:600;margin:0 0 10px}
+.label span{font-weight:400;color:var(--ink-2)}
+.swatches{display:flex;flex-wrap:wrap;gap:10px}
+.swatch{width:34px;height:34px;border-radius:50%;border:1px solid rgba(0,0,0,.12);position:relative;padding:0;background:var(--c)}
+.swatch.dual{background:linear-gradient(135deg,var(--c) 0 55%,var(--m) 55% 100%)}
+.swatch[aria-pressed="true"]::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:1.5px solid var(--black)}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.card{border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:6px 6px 8px;text-align:left;display:flex;flex-direction:column;gap:6px}
+.card img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:4px;background:var(--warm-2)}
+.card b{font-size:12px;font-weight:600;line-height:1.25}
+.card span{font-size:12px;color:var(--ink-2)}
+.card[aria-pressed="true"]{border-color:var(--black);box-shadow:inset 0 0 0 1px var(--black)}
+.note{font-size:13px;line-height:1.55;color:var(--ink-2);background:var(--warm-2);border-radius:6px;padding:12px 14px;margin:0}
+
+/* flow */
+.flow{max-width:1320px;margin:8px auto 0;padding:clamp(24px,4vw,48px) clamp(16px,4vw,40px);border-top:1px solid var(--line)}
+.flow h2{font-size:clamp(20px,2.2vw,26px);font-weight:600;margin:0 0 6px;text-wrap:balance}
+.flow > p{margin:0 0 24px;color:var(--ink-2);max-width:62ch;line-height:1.55}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;list-style:none;padding:0;margin:0;counter-reset:s}
+.steps li{counter-increment:s;background:var(--warm-2);border-radius:6px;padding:18px;line-height:1.5;font-size:14px;color:var(--ink-2)}
+.steps li::before{content:counter(s);display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--black);color:#fff;font-size:13px;font-weight:600;margin-bottom:12px}
+.steps b{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
+footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;font-size:12px;color:var(--ink-3);line-height:1.6}
+
+@media (max-width:860px){
+  .wrap{grid-template-columns:1fr}
+  .stage{aspect-ratio:3/4;max-height:72vh}
+  .grid{display:flex;overflow-x:auto;gap:10px;padding-bottom:4px;scroll-snap-type:x mandatory}
+  .card{flex:0 0 118px;scroll-snap-align:start}
+  .steps{grid-template-columns:1fr}
+  .brand span{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><b>Rinfit</b><span>Virtual ring try-on</span></div>
+  <span class="pill">Concept prototype</span>
+</header>
+
+<main class="wrap">
+  <section class="stage" id="stage" aria-label="Try-on view">
+    <video id="video" playsinline muted hidden></video>
+    <img id="photo" class="photo" alt="" hidden>
+    <canvas id="gl"></canvas>
+    <div class="modes" role="group" aria-label="View mode">
+      <button id="mode-3d" aria-pressed="true">3D view</button>
+      <button id="mode-live" aria-pressed="false">Live try-on</button>
+      <button id="mode-photo" aria-pressed="false">Photo</button>
+    </div>
+    <div class="hint" id="hint">Drag to rotate the ring</div>
+    <div class="bar">
+      <div class="fingers" role="group" aria-label="Finger" id="fingers">
+        <button data-f="index" aria-pressed="false">Index</button>
+        <button data-f="middle" aria-pressed="false">Middle</button>
+        <button data-f="ring" aria-pressed="true">Ring</button>
+        <button data-f="pinky" aria-pressed="false">Pinky</button>
+      </div>
+      <button class="round" id="flip" title="Switch camera" aria-label="Switch camera" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><path d="M9 13a3 3 0 0 0 5.6 1.5M15 12a3 3 0 0 0-5.6-1.5"/></svg>
+      </button>
+      <button class="round" id="shot" title="Save snapshot" aria-label="Save snapshot" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg>
+      </button>
+    </div>
+    <div class="loader" id="loader" hidden>Loading hand tracking…</div>
+    <input type="file" id="file" accept="image/*" hidden>
+  </section>
+
+  <aside class="panel">
+    <div>
+      <p class="eyebrow" id="p-family">GlowStone</p>
+      <h1 class="title" id="p-name">Ring</h1>
+      <div class="row">
+        <span class="price" id="p-price">$0.00</span>
+        <a class="link" id="p-link" href="https://www.rinfit.com/" target="_blank" rel="noopener">View on rinfit.com ↗</a>
+      </div>
+    </div>
+    <div>
+      <p class="label">Color: <span id="p-color">—</span></p>
+      <div class="swatches" id="swatches" role="group" aria-label="Color"></div>
+    </div>
+    <div>
+      <p class="label">Choose a ring</p>
+      <div class="grid" id="grid"></div>
+    </div>
+    <p class="note">Everything runs on the device: the camera image never leaves the phone. Hold your hand 30–50 cm from the camera, back of the hand towards the lens.</p>
+  </aside>
+</main>
+
+<section class="flow">
+  <h2>How it would work on rinfit.com</h2>
+  <p>One button on the product page. No app to install, no upload — the try-on opens right under the photos and keeps the chosen color and size in sync with the cart.</p>
+  <ol class="steps">
+    <li><b>“Try it on” next to the photos</b>Shown on every ring page, on phones and desktop.</li>
+    <li><b>Camera or a photo of your hand</b>The ring snaps to the chosen finger and follows the hand in real time.</li>
+    <li><b>Switch colors, then add to cart</b>Colors and styles change instantly, so the shopper compares before buying.</li>
+  </ol>
+</section>
+
+<footer>
+  Concept prototype prepared for Rinfit. Not an official Rinfit page. Product names, prices and photos are taken from rinfit.com on 15 September 2026; 3D rings are simplified renders, not exact product models.
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
