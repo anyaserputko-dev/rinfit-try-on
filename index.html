@@ -60,6 +60,7 @@ button:focus-visible,a:focus-visible,label:focus-within{outline:2px solid var(--
 .price{font-size:18px;font-weight:500}
 .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .link{font-size:13px;color:var(--ink);text-underline-offset:3px}
+.set-note{font-size:13px;color:var(--ink-2);margin:10px 0 0;line-height:1.5}
 .label{font-size:13px;font-weight:600;margin:0 0 10px}
 .label span{font-weight:400;color:var(--ink-2)}
 .swatches{display:flex;flex-wrap:wrap;gap:10px}
@@ -138,6 +139,7 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
         <span class="price" id="p-price">$0.00</span>
         <a class="link" id="p-link" href="https://www.rinfit.com/" target="_blank" rel="noopener">View on rinfit.com ↗</a>
       </div>
+      <p class="set-note" id="p-set" hidden></p>
     </div>
     <div>
       <p class="label">Color: <span id="p-color">—</span></p>
@@ -162,7 +164,7 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
 </section>
 
 <footer>
-  Concept prototype prepared for Rinfit. Not an official Rinfit page. Product names, prices and photos are taken from rinfit.com on 15 September 2026; 3D rings are simplified renders, not exact product models.
+  Concept prototype prepared for Rinfit. Not an official Rinfit page. Product names, prices and photos are taken from rinfit.com on 15 September 2026. 3D rings are rebuilt from the product sizes and photos; Rinfit's own CAD files can replace them one-to-one.
 </footer>
 
 <script type="module" src="app.js"></script>

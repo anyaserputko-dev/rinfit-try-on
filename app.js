@@ -1,13 +1,15 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { RINGS, SILICONE, METAL, parseColor } from "./catalog.js";
-import { createRing, INNER_RADIUS } from "./rings.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RINGS, METAL, parseColor, bandHex } from "./catalog.js";
+import { createRing, setGemEnvironment, INNER_RADIUS } from "./rings.js";
 
 const MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-// [MCP, PIP] landmark pairs and finger width relative to average knuckle spacing
+// [MCP, PIP] landmark pairs and finger width relative to the hand measure
 const FINGERS = { index: [5, 6, 1.05], middle: [9, 10, 1.07], ring: [13, 14, 1.0], pinky: [17, 18, 0.86] };
+// where the second ring of a set goes
+const NEIGHBOR = { index: "middle", middle: "ring", ring: "middle", pinky: "ring" };
 const RING_POS = 0.47;    // position between knuckle and middle joint
 const SMOOTH = 0.5;       // landmark smoothing for live video
 
@@ -20,35 +22,76 @@ const state = {
   ring: RINGS.find((r) => r.id === params.get("ring")) || RINGS[4],
   color: null, finger: params.get("finger") || "ring", mode: "3d", facing: "user",
   stream: null, landmarker: null, lmMode: null, hand: null, lastSeen: 0, lastVideoTime: -1,
-  w: 0, h: 0
+  w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0
 };
 state.color = state.ring.colors.includes(params.get("color")) ? params.get("color") : state.ring.colors[0];
-window.__tryon = { ready: false, placed: false, error: null, debug: null };
+window.__tryon = { ready: false, built: false, placed: false, error: null, debug: null };
 
 /* ---------- renderer & scenes ---------- */
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
-const env = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+renderer.toneMapping = THREE.NeutralToneMapping;   // keeps pastel silicone colors true to the product photos
+renderer.toneMappingExposure = 1.0;
+// Jewellery studio: grey room with bright softboxes, so metal reads as polished and facets flash white.
+function studioEnvironment() {
+  const scene = new THREE.Scene();
+  scene.add(new THREE.Mesh(new THREE.BoxGeometry(40, 30, 40), new THREE.MeshBasicMaterial({ color: "#8c8c90", side: THREE.BackSide })));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ color: "#b9b6b2" }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -14;
+  scene.add(floor);
+  const panel = (w, h, x, y, z, s) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(s, s, s), side: THREE.DoubleSide }));
+    m.position.set(x, y, z);
+    m.lookAt(0, 0, 0);
+    scene.add(m);
+  };
+  panel(18, 6, 0, 14, 0, 6);
+  panel(8, 16, 18, 2, 6, 4);
+  panel(8, 16, -18, 2, 6, 3);
+  panel(12, 6, 0, 4, 19, 3);
+  panel(4, 10, 10, 6, -18, 5);
+  panel(4, 10, -10, 6, -18, 5);
+  return new THREE.PMREMGenerator(renderer).fromScene(scene, 0.02).texture;
+}
+const env = studioEnvironment();
+
+// Light tent for stones: bright surroundings with thin dark cards and a few hot spots,
+// which gives the mostly-white CZ look with dark facet accents seen in the product photos.
+function gemEnvironment() {
+  const scene = new THREE.Scene();
+  scene.add(new THREE.Mesh(new THREE.BoxGeometry(40, 40, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.1, 1.1, 1.12), side: THREE.BackSide })));
+  const card = (w, h, x, y, z, color) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
+    m.position.set(x, y, z);
+    m.lookAt(0, 0, 0);
+    scene.add(m);
+  };
+  const dark = new THREE.Color(0.02, 0.02, 0.025), hot = new THREE.Color(9, 9, 9);
+  for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI * 2; card(0.9, 14, Math.cos(a) * 17, 0, Math.sin(a) * 17, dark); }
+  for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 + 0.2; card(4, 0.7, Math.cos(a) * 12, 13, Math.sin(a) * 12, dark); }
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + 0.4; card(2.2, 2.2, Math.cos(a) * 15, 8 - (i % 3) * 7, Math.sin(a) * 15, hot); }
+  card(8, 8, 0, 17, 0, hot);
+  card(14, 14, 0, -17, 0, new THREE.Color(0.35, 0.35, 0.36));
+  return new THREE.PMREMGenerator(renderer).fromScene(scene, 0).texture;
+}
+setGemEnvironment(gemEnvironment());
 
 // 3D product view
 const viewScene = new THREE.Scene();
 viewScene.environment = env;
 const viewCam = new THREE.PerspectiveCamera(30, 1, 1, 1000);
-viewCam.position.set(0, 22, 66);
 const controls = new OrbitControls(viewCam, canvas);
-Object.assign(controls, { enableDamping: true, autoRotate: true, autoRotateSpeed: 1.4, enablePan: false, minDistance: 34, maxDistance: 120 });
-controls.target.set(0, 2, 0);
-const key = new THREE.DirectionalLight("#ffffff", 1.3);
+Object.assign(controls, { enableDamping: true, autoRotate: params.get("spin") !== "0", autoRotateSpeed: 1.4, enablePan: false, minDistance: 30, maxDistance: 140 });
+const key = new THREE.DirectionalLight("#ffffff", 0.8);
 key.position.set(25, 45, 35);
-const fill = new THREE.DirectionalLight("#fff6ee", 0.9);
+const fill = new THREE.DirectionalLight("#fff6ee", 0.35);
 fill.position.set(-10, -6, 50);
-viewScene.add(key, fill);
-const shadow = new THREE.Mesh(new THREE.CircleGeometry(17, 48),
+viewScene.add(key, fill, new THREE.HemisphereLight("#ffffff", "#d8d0c8", 0.35));
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(19, 48),
   new THREE.MeshBasicMaterial({ map: radialTexture(), transparent: true, depthWrite: false }));
 shadow.rotation.x = -Math.PI / 2;
-shadow.position.y = -13.5;
+shadow.position.y = -14.5;
 viewScene.add(shadow);
 const viewHolder = new THREE.Group();
 viewScene.add(viewHolder);
@@ -56,14 +99,13 @@ viewScene.add(viewHolder);
 // AR overlay: orthographic camera in stage pixels, y up, z towards the viewer
 const arScene = new THREE.Scene();
 arScene.environment = env;
-arScene.environmentIntensity = 0.9;
 const arCam = new THREE.OrthographicCamera(0, 1, 0, -1, -20000, 20000);
-const arLight = new THREE.DirectionalLight("#ffffff", 1.0);
+const arLight = new THREE.DirectionalLight("#ffffff", 0.7);
 arLight.position.set(0.3, 1, 1);
-arScene.add(arLight);
-const arHolder = new THREE.Group();
-arHolder.visible = false;
-arScene.add(arHolder);
+arScene.add(arLight, new THREE.HemisphereLight("#ffffff", "#d8d0c8", 0.4));
+const arMain = new THREE.Group(), arSecond = new THREE.Group();
+arMain.visible = arSecond.visible = false;
+arScene.add(arMain, arSecond);
 
 function radialTexture() {
   const c = document.createElement("canvas");
@@ -81,37 +123,100 @@ function radialTexture() {
 
 function dispose(group) {
   group.traverse((o) => {
-    if (o.geometry) o.geometry.dispose();
-    if (o.material) o.material.dispose();
+    if (o.userData.shared) return;
+    o.geometry?.dispose();
+    const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of mats) { m.map?.dispose(); m.dispose(); }
   });
   group.clear();
 }
 
 /* ---------- ring build ---------- */
-function rebuild() {
-  dispose(viewHolder);
-  dispose(arHolder);
+// A real GLB model (ring.model) replaces the procedural ring when it is available.
+const gltf = new GLTFLoader();
+const modelCache = new Map();
+async function buildPiece(ring, color) {
+  if (!ring.model) return createRing(ring, color);
+  if (!modelCache.has(ring.model.url)) modelCache.set(ring.model.url, gltf.loadAsync(ring.model.url).then((g) => g.scene));
+  const scene = await modelCache.get(ring.model.url);
+  const group = new THREE.Group();
+  const inst = scene.clone(true);
+  inst.traverse((o) => (o.userData.shared = true));
+  inst.scale.setScalar(ring.model.scale ?? 1);
+  group.add(inst);
+  return { group, bandLength: ring.model.bandLength ?? 6 };
+}
 
-  const view = createRing(state.ring, state.color).group;
-  view.rotation.x = -Math.PI / 2;           // stone up, hole towards the camera
-  view.rotation.z = 0.5;
-  viewHolder.add(view);
-
-  const { group, length } = createRing(state.ring, state.color);
-  state.arLength = length;
+function addToAr(holder, piece) {
   const occluder = new THREE.Mesh(
-    new THREE.CylinderGeometry(INNER_RADIUS * 0.98, INNER_RADIUS * 0.98, length + 60, 40),
+    new THREE.CylinderGeometry(INNER_RADIUS * 0.98, INNER_RADIUS * 0.98, piece.bandLength + 60, 40),
     new THREE.MeshBasicMaterial({ colorWrite: false })
   );
   occluder.renderOrder = -1;
-  arHolder.add(occluder, group);
+  holder.add(occluder, piece.group);
+  holder.userData.bandLength = piece.bandLength;
+}
+
+// Product-photo angles: which way the stone (local Z) and the finger axis (local Y) point.
+const VIEWS = {
+  front: { z: [0, 0.45, 0.89], y: [0, 1, -0.45] },          // stone at the camera, band as a hoop seen from slightly above
+  threeq: { z: [-0.25, 0.5, 0.83], y: [0.35, 0.8, -0.5] },  // three-quarter view, like the Emerald and Halo photos
+  top: { z: [0, 0.12, 1], y: [0, 1, -0.12] },               // stone straight at the camera, bands as horizontal strips
+  band: { z: [-0.35, 0.05, 0.94], y: [0.85, 0.2, -0.45] },  // band on its edge, logo side to the camera
+  couture: { z: [-0.3, 0.88, 0.37], y: [0.8, 0.1, -0.6] }   // V peak up, ring opening to the right
+};
+function orient(obj, type) {
+  const v = VIEWS[type] || VIEWS.front;
+  const z = new THREE.Vector3(...v.z).normalize();
+  const x = new THREE.Vector3().crossVectors(new THREE.Vector3(...v.y), z).normalize();
+  const y = new THREE.Vector3().crossVectors(z, x).normalize();
+  obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+}
+
+function setViewCamera(count) {
+  const dist = count > 1 ? 92 : 66;
+  const az = THREE.MathUtils.degToRad(+(params.get("az") ?? 0));
+  const el = THREE.MathUtils.degToRad(+(params.get("el") ?? 17));
+  controls.target.set(0, 2, 0);
+  viewCam.position.set(Math.sin(az) * Math.cos(el) * dist, 2 + Math.sin(el) * dist, Math.cos(az) * Math.cos(el) * dist);
+  controls.update();
+}
+
+async function rebuild() {
+  const token = ++state.buildToken;
+  const [view, ar] = await Promise.all([buildPiece(state.ring, state.color), buildPiece(state.ring, state.color)]);
+  if (token !== state.buildToken) return;
+  dispose(viewHolder);
+  dispose(arMain);
+  dispose(arSecond);
+
+  const pieces = [view, view.second].filter(Boolean);
+  pieces.forEach((p, i) => {
+    const pivot = new THREE.Group();
+    orient(p.group, state.ring.view);
+    if (pieces.length > 1) {   // two rings of a set side by side, like the product photo
+      pivot.position.set(i ? 9 : -9, 0, i ? 4 : -4);
+      pivot.rotation.y = i ? -0.3 : 0.3;
+    }
+    pivot.add(p.group);
+    viewHolder.add(pivot);
+  });
+  if (pieces.length !== state.viewCount) { state.viewCount = pieces.length; setViewCamera(pieces.length); }
+
+  addToAr(arMain, ar);
+  state.hasSecond = !!ar.second;
+  if (ar.second) addToAr(arSecond, ar.second);
+  window.__tryon.built = true;
   renderPanel();
 }
 
 /* ---------- panel UI ---------- */
-function swatchColors(name) {
-  const { band, metal } = parseColor(name);
-  return { band: SILICONE[band] || "#ccc", metal: metal ? METAL[metal] : null };
+function swatchColors(ring, name) {
+  const { bands, metals } = parseColor(name);
+  const a = bandHex(ring, bands[0]);
+  if (bands.length > 1) return { a, b: bandHex(ring, bands[1]) };
+  if (name !== bands[0]) return { a, b: METAL[metals[0]] };
+  return { a, b: null };
 }
 
 function renderPanel() {
@@ -121,14 +226,16 @@ function renderPanel() {
   $("p-price").textContent = `$${r.price.toFixed(2)}`;
   $("p-link").href = r.url;
   $("p-color").textContent = state.color;
+  const note = $("p-set");
+  note.hidden = r.spec.pair !== "separate";
+  note.textContent = "Set of 2 rings. In try-on the second ring goes on the neighbouring finger.";
 
-  const sw = $("swatches");
-  sw.replaceChildren(...r.colors.map((c) => {
+  $("swatches").replaceChildren(...r.colors.map((c) => {
     const b = document.createElement("button");
-    const { band, metal } = swatchColors(c);
-    b.className = "swatch" + (metal ? " dual" : "");
-    b.style.setProperty("--c", band);
-    if (metal) b.style.setProperty("--m", metal);
+    const { a, b: second } = swatchColors(r, c);
+    b.className = "swatch" + (second ? " dual" : "");
+    b.style.setProperty("--c", a);
+    if (second) b.style.setProperty("--m", second);
     b.setAttribute("aria-label", c);
     b.title = c;
     b.setAttribute("aria-pressed", String(c === state.color));
@@ -178,9 +285,8 @@ async function getLandmarker(runningMode) {
         baseOptions: { modelAssetPath: MODEL, delegate }, runningMode, numHands: 2,
         minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5
       });
-      const preferCpu = params.get("cpu") === "1";
       try {
-        state.landmarker = await HandLandmarker.createFromOptions(files, opts(preferCpu ? "CPU" : "GPU"));
+        state.landmarker = await HandLandmarker.createFromOptions(files, opts(params.get("cpu") === "1" ? "CPU" : "GPU"));
       } catch {
         state.landmarker = await HandLandmarker.createFromOptions(files, opts("CPU"));
       }
@@ -236,37 +342,45 @@ function mapper(srcW, srcH) {
   return (p) => new THREE.Vector3(ox + p.x * srcW * sc, -(oy + p.y * srcH * sc), -p.z * srcW * sc);
 }
 
-function placeRing(srcW, srcH) {
-  const hand = state.hand;
-  if (!hand || !srcW) { arHolder.visible = false; return; }
-  const P = mapper(srcW, srcH);
-  const L = hand.lms;
-  const [ia, ib, widthK] = FINGERS[state.finger];
-  const A = P(L[ia]), B = P(L[ib]);
-  const P0 = P(L[0]), P5 = P(L[5]), P9 = P(L[9]), P13 = P(L[13]), P17 = P(L[17]);
-
+function placeOn(holder, finger, pts, spacing, palm) {
+  const [ia, ib, widthK] = FINGERS[finger];
+  const A = pts[ia].clone(), B = pts[ib].clone();
   const axis = new THREE.Vector3().subVectors(B, A).normalize();
   // Each measure shrinks when the hand turns away from the camera, so take the largest.
-  const spacing = (P5.distanceTo(P9) + P9.distanceTo(P13) + P13.distanceTo(P17)) / 3;
-  const fingerWidth = Math.max(spacing * 0.86, P0.distanceTo(P9) * 0.185, A.distanceTo(B) * 0.42) * widthK;
+  const fingerWidth = Math.max(spacing * 0.86, pts[0].distanceTo(pts[9]) * 0.185, A.distanceTo(B) * 0.42) * widthK;
   const scale = fingerWidth / (INNER_RADIUS * 2);
-
-  // Normal of the back of the hand. Checked on test photos: for a hand labelled "Right"
-  // the raw cross product points into the palm, so it is flipped.
-  const n = new THREE.Vector3().subVectors(P5, P0).cross(new THREE.Vector3().subVectors(P17, P0)).normalize();
-  if (hand.handed === "Right") n.negate();
-  const zAxis = n.sub(axis.clone().multiplyScalar(n.dot(axis))).normalize();
+  const zAxis = palm.clone().sub(axis.clone().multiplyScalar(palm.dot(axis))).normalize();
   const xAxis = new THREE.Vector3().crossVectors(axis, zAxis).normalize();
-
-  arHolder.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
+  holder.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
   // Long stacks move further up the finger so they do not sink into the knuckle.
   const seg = Math.max(A.distanceTo(B), 1);
-  const t = Math.min(0.65, Math.max(RING_POS, 0.3 + (state.arLength / 2) * scale / seg));
-  arHolder.position.copy(A.lerp(B, t));
-  arHolder.scale.setScalar(scale);
-  arHolder.visible = true;
+  const t = Math.min(0.65, Math.max(RING_POS, 0.3 + ((holder.userData.bandLength || 6) / 2) * scale / seg));
+  holder.position.copy(A.lerp(B, t));
+  holder.scale.setScalar(scale);
+  holder.visible = true;
+  return { finger, scale: +scale.toFixed(3), facing: +zAxis.z.toFixed(2) };
+}
+
+function placeRing(srcW, srcH) {
+  const hand = state.hand;
+  if (!hand || !srcW || !window.__tryon.built) { arMain.visible = arSecond.visible = false; return; }
+  const P = mapper(srcW, srcH);
+  const pts = hand.lms.map((p) => P(p));
+  const spacing = (pts[5].distanceTo(pts[9]) + pts[9].distanceTo(pts[13]) + pts[13].distanceTo(pts[17])) / 3;
+  // Normal of the back of the hand. The handedness label is unreliable on photos, so decide by anatomy:
+  // the thumb and curled fingertips sit on the palm side of the wrist–knuckle plane.
+  const raw = new THREE.Vector3().subVectors(pts[5], pts[0]).cross(new THREE.Vector3().subVectors(pts[17], pts[0])).normalize();
+  let vote = 0;
+  for (const [k, w] of [[2, 1], [3, 1], [4, 1], [8, 0.4], [12, 0.4], [16, 0.4], [20, 0.4]]) {
+    vote += w * new THREE.Vector3().subVectors(pts[k], pts[0]).dot(raw);
+  }
+  const unsure = Math.abs(vote) < spacing * 0.05;
+  const palm = (unsure ? hand.handed === "Right" : vote > 0) ? raw.clone().negate() : raw.clone();
+  const debug = { handed: hand.handed, vote: +(vote / spacing).toFixed(2), main: placeOn(arMain, state.finger, pts, spacing, palm) };
+  if (state.hasSecond) debug.second = placeOn(arSecond, NEIGHBOR[state.finger], pts, spacing, palm);
+  else arSecond.visible = false;
   window.__tryon.placed = true;
-  window.__tryon.debug = { handed: hand.handed, scale: +scale.toFixed(3), facing: +zAxis.z.toFixed(2) };
+  window.__tryon.debug = debug;
 }
 
 /* ---------- sources ---------- */
@@ -297,7 +411,7 @@ async function startCamera() {
 
 async function loadPhoto(src) {
   photo.hidden = false;
-  arHolder.visible = false;
+  arMain.visible = arSecond.visible = false;
   state.hand = null;
   setHint("Finding your hand…");
   photo.src = src;
@@ -324,7 +438,7 @@ async function setMode(mode) {
   $("shot").hidden = !ar;
   if (mode !== "live") stopCamera();
   if (mode !== "photo") photo.hidden = true;
-  arHolder.visible = false;
+  arMain.visible = arSecond.visible = false;
   state.hand = null;
 
   if (mode === "3d") setHint("Drag to rotate · pinch to zoom");
@@ -396,7 +510,8 @@ function frame() {
 }
 
 buildGrid();
-rebuild();
+setViewCamera(1);
+rebuild().catch((e) => { window.__tryon.error = String(e); setHint("This ring could not be loaded"); });
 setHint("Drag to rotate · pinch to zoom");
 frame();
 if (params.get("photo")) setMode("photo");
