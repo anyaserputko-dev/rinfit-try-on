@@ -108,8 +108,7 @@ arScene.environment = env;
 const arCam = new THREE.OrthographicCamera(0, 1, 0, -1, -20000, 20000);
 const arLight = new THREE.DirectionalLight("#ffffff", 0.7);
 arLight.position.set(0.3, 1, 1);
-const arHemi = new THREE.HemisphereLight("#ffffff", "#d8d0c8", 0.4);
-arScene.add(arLight, arHemi);
+arScene.add(arLight, new THREE.HemisphereLight("#ffffff", "#d8d0c8", 0.4));
 const arMain = new THREE.Group(), arSecond = new THREE.Group();
 arMain.visible = arSecond.visible = false;
 arScene.add(arMain, arSecond);
@@ -144,7 +143,6 @@ function dispose(group) {
 // Metal (Silver or Rose Gold), CZ / CZ_Black (swapped for the realtime gem shader).
 const gltf = new GLTFLoader();
 const modelCache = new Map();
-const gemMats = [];   // stone shaders currently on stage, retinted from the camera frame
 
 function dressModel(ring, scene, band, second, metal) {
   const root = scene.clone(true);
@@ -170,7 +168,6 @@ function dressModel(ring, scene, band, second, metal) {
   for (const [o, black, small] of swaps) {
     if (!small) {   // main stone: one convex solid, ray-traced against its own facets
       o.material = stoneMaterial(o.geometry, { black });
-      gemMats.push(o.material);
       o.userData.shared = false;
       o.userData.ownsGeometry = false;
       continue;
@@ -211,76 +208,8 @@ function addToAr(holder, piece) {
     new THREE.MeshBasicMaterial({ colorWrite: false })
   );
   occluder.renderOrder = -1;
-  // Soft contact shadow on the skin under the band. Drawn before the ring, straight onto the transparent
-  // canvas, so it darkens the camera image underneath — without it the ring reads as a sticker.
-  const shadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(INNER_RADIUS * 2.7, piece.bandLength * 2.1 + 3),
-    new THREE.MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false,
-                                  opacity: +(params.get("shadow") ?? 0.45) })
-  );
-  shadow.position.z = INNER_RADIUS * 0.72;
-  shadow.renderOrder = -2;
-  holder.add(shadow, occluder, piece.group);
+  holder.add(occluder, piece.group);
   holder.userData.bandLength = piece.bandLength;
-}
-
-// Shadow of a ring on skin: darkest right where the band meets the finger, fading along the finger,
-// and held wide across it (only fading near the finger's outline). A plain radial blob is too weak
-// to read once the band covers its middle.
-function shadowTexture() {
-  const S = 128;
-  const c = document.createElement("canvas");
-  c.width = c.height = S;
-  const g = c.getContext("2d");
-  const img = g.createImageData(S, S);
-  for (let y = 0; y < S; y++) {
-    const v = Math.abs(y / (S - 1) * 2 - 1);                 // along the finger, 0 at the band
-    const along = Math.pow(Math.max(0, 1 - v), 1.6);
-    for (let x = 0; x < S; x++) {
-      const u = Math.abs(x / (S - 1) * 2 - 1);               // across the finger
-      const across = u < 0.62 ? 1 : Math.pow(Math.max(0, 1 - (u - 0.62) / 0.38), 1.4);
-      const i = (y * S + x) * 4;
-      img.data[i] = 26; img.data[i + 1] = 19; img.data[i + 2] = 15;
-      img.data[i + 3] = Math.round(255 * along * across);
-    }
-  }
-  g.putImageData(img, 0, 0);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
-// The ring has to sit in the room's light, not in a studio: sample the camera frame and push its
-// brightness and colour into the AR lights and the stone shader.
-const probe = document.createElement("canvas");
-probe.width = probe.height = 16;
-const probeCtx = probe.getContext("2d", { willReadFrequently: true });
-const sceneLight = { tint: new THREE.Color(1, 1, 1), exposure: 1, last: 0 };
-
-function sampleScene(src) {
-  const w = src?.videoWidth || src?.naturalWidth || 0;
-  if (!w || performance.now() - sceneLight.last < 250) return;
-  sceneLight.last = performance.now();
-  try { probeCtx.drawImage(src, 0, 0, 16, 16); } catch { return; }
-  const d = probeCtx.getImageData(0, 0, 16, 16).data;
-  let r = 0, g = 0, b = 0;
-  for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-  const n = d.length / 4;
-  r /= 255 * n; g /= 255 * n; b /= 255 * n;
-  const lum = Math.max(0.02, 0.2126 * r + 0.7152 * g + 0.0722 * b);
-  const tint = new THREE.Color(r / lum, g / lum, b / lum).lerp(new THREE.Color(1, 1, 1), 0.45);
-  sceneLight.tint.lerp(tint, 0.25);
-  sceneLight.exposure += (THREE.MathUtils.clamp(0.5 + lum * 0.9, 0.62, 1.2) - sceneLight.exposure) * 0.25;
-}
-
-function applySceneLight() {
-  renderer.toneMappingExposure = sceneLight.exposure;
-  arLight.color.copy(sceneLight.tint);
-  arHemi.color.copy(sceneLight.tint);
-  for (const m of gemMats) {
-    m.uniforms.uTint.value.copy(m.userData.baseTint || new THREE.Color(1, 1, 1)).multiply(sceneLight.tint);
-    m.uniforms.uExposure.value = (m.userData.baseExposure ?? 1) * sceneLight.exposure;
-  }
 }
 
 // Product-photo angles: which way the stone (local Z) and the finger axis (local Y) point.
@@ -316,7 +245,6 @@ function setViewCamera(count) {
 
 async function rebuild() {
   const token = ++state.buildToken;
-  gemMats.length = 0;
   const [view, ar] = await Promise.all([buildPiece(state.ring, state.color), buildPiece(state.ring, state.color)]);
   if (token !== state.buildToken) return;
   dispose(viewHolder);
@@ -483,18 +411,11 @@ function onResult(result, live) {
 // Map a normalized landmark to stage pixels. Live video fills the stage (cover),
 // photos are shown whole (contain) so no hand gets cropped away.
 const fitMode = () => (state.mode === "photo" ? "contain" : "cover");
-function frameFit(srcW, srcH) {
-  const sc = fitMode() === "contain" ? Math.min(state.w / srcW, state.h / srcH) : Math.max(state.w / srcW, state.h / srcH);
-  return { sc, ox: (state.w - srcW * sc) / 2, oy: (state.h - srcH * sc) / 2 };
-}
 function mapper(srcW, srcH) {
-  const { sc, ox, oy } = frameFit(srcW, srcH);
+  const sc = fitMode() === "contain" ? Math.min(state.w / srcW, state.h / srcH) : Math.max(state.w / srcW, state.h / srcH);
+  const ox = (state.w - srcW * sc) / 2, oy = (state.h - srcH * sc) / 2;
   return (p) => new THREE.Vector3(ox + p.x * srcW * sc, -(oy + p.y * srcH * sc), -p.z * srcW * sc);
 }
-
-// Reading the finger's width off the camera frame (walking out from the middle until the colour stops being
-// skin) was tried here and dropped: on soft-lit hands the walk stops on the shading near the edge and the ring
-// comes out far too small. The landmark estimate below plus the shopper's own -/+ knob work better.
 
 function placeOn(holder, finger, pts, spacing, palm) {
   const [ia, ib, widthK] = FINGERS[finger];
@@ -506,7 +427,12 @@ function placeOn(holder, finger, pts, spacing, palm) {
   const zAxis = palm.clone().sub(axis.clone().multiplyScalar(palm.dot(axis))).normalize();
   const xAxis = new THREE.Vector3().crossVectors(axis, zAxis).normalize();
   holder.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
-  window.__tryon.fit = { finger, widthK, fingerWidth: +fingerWidth.toFixed(1), knob: state.fit };
+  window.__tryon.fit = {   // for the fit calibration script
+    finger, widthK, fingerWidth: +fingerWidth.toFixed(1),
+    bySpacing: +(spacing * 0.86 * widthK).toFixed(1),
+    byPalm: +(pts[0].distanceTo(pts[9]) * 0.185 * widthK).toFixed(1),
+    bySegment: +(A.distanceTo(B) * 0.42 * widthK).toFixed(1)
+  };
   // Long stacks move further up the finger so they do not sink into the knuckle.
   const seg = Math.max(A.distanceTo(B), 1);
   const t = Math.min(0.65, Math.max(RING_POS, 0.3 + ((holder.userData.bandLength || 6) / 2) * scale / seg));
@@ -653,7 +579,6 @@ function frame() {
 function step() {
   resize();
   if (state.mode === "3d") {
-    renderer.toneMappingExposure = 1;
     controls.update();
     renderer.render(viewScene, viewCam);
   } else {
@@ -667,8 +592,6 @@ function step() {
     const srcW = state.mode === "live" ? video.videoWidth : photo.naturalWidth;
     const srcH = state.mode === "live" ? video.videoHeight : photo.naturalHeight;
     placeRing(srcW, srcH);
-    sampleScene(state.mode === "live" ? video : photo);
-    applySceneLight();
     renderer.render(arScene, arCam);
   }
   window.__tryon.ready = true;

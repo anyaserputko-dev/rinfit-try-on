@@ -69,12 +69,11 @@ for (const c of cases) {
   }, c.frames || 30);
   const info = await page.evaluate(() => ({
     built: window.__tryon?.built, placed: window.__tryon?.placed, error: window.__tryon?.error, debug: window.__tryon?.debug,
-    fit: window.__tryon?.fit,
     hint: document.getElementById("hint").hidden ? "" : document.getElementById("hint").textContent
   }));
   const file = `${OUT}${c.name}.png`;
   fs.writeFileSync(file, Buffer.from(dataUrl.split(",")[1], "base64"));
-  console.log(`${c.name}: ${status} built=${info.built} placed=${info.placed} err=${info.error || "-"} debug=${JSON.stringify(info.debug)} fit=${JSON.stringify(info.fit)} hint="${info.hint}" -> ${file}`);
+  console.log(`${c.name}: ${status} built=${info.built} placed=${info.placed} err=${info.error || "-"} debug=${JSON.stringify(info.debug)} hint="${info.hint}" -> ${file}`);
   if (errors.length) console.log("  console:", [...new Set(errors)].slice(0, 8).join(" || "));
   await page.close();
 }
