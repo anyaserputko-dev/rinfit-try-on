@@ -22,7 +22,7 @@ const params = new URLSearchParams(location.search);
 const state = {
   ring: RINGS.find((r) => r.id === params.get("ring")) || RINGS[4],
   color: null, finger: params.get("finger") || "ring", mode: "3d", facing: "user",
-  stream: null, landmarker: null, lmMode: null, hand: null, lastSeen: 0, lastVideoTime: -1,
+  stream: null, landmarker: null, lmMode: null, hand: null, lastSeen: 0, lastVideoTime: -1, lastDetect: 0,
   w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0
 };
 state.color = state.ring.colors.includes(params.get("color")) ? params.get("color") : state.ring.colors[0];
@@ -35,7 +35,7 @@ window.__tryon = { ready: false, built: false, placed: false, error: null, debug
 
 /* ---------- renderer & scenes ---------- */
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));   // phones are 3x: at 2x the ring looks soft next to the video
 renderer.toneMapping = THREE.NeutralToneMapping;   // keeps pastel silicone colors true to the product photos
 renderer.toneMappingExposure = 1.0;
 // Jewellery studio: grey room with bright softboxes, so metal reads as polished and facets flash white.
@@ -485,7 +485,12 @@ async function startCamera() {
   setHint("Allow camera access");
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: state.facing, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false
+      // ask for the sharpest stream the phone will give; it falls back on its own if this is too much
+      video: {
+        facingMode: state.facing, width: { ideal: 1920 }, height: { ideal: 1440 },
+        frameRate: { ideal: 30 }, resizeMode: "none"
+      },
+      audio: false
     });
   } catch {
     setHint("Camera blocked — try the Photo mode");
@@ -493,6 +498,8 @@ async function startCamera() {
   }
   video.srcObject = state.stream;
   await video.play().catch(() => {});
+  const s = state.stream.getVideoTracks()[0]?.getSettings?.() || {};
+  window.__tryon.camera = `${s.width || video.videoWidth}x${s.height || video.videoHeight}@${Math.round(s.frameRate || 0)}`;
   stage.classList.toggle("mirror", state.facing === "user");
   setHint("Show the back of your hand");
   await getLandmarker("VIDEO").catch(() => {});
@@ -589,9 +596,12 @@ function step() {
     controls.update();
     renderer.render(viewScene, viewCam);
   } else {
+    // Track at ~20 Hz, draw at screen rate: hand tracking on every frame starves the preview on a phone,
+    // and the ring keeps following the hand from the smoothed landmarks in between.
     if (state.mode === "live" && state.landmarker && state.lmMode === "VIDEO" && video.readyState >= 2
-        && video.currentTime !== state.lastVideoTime) {
+        && video.currentTime !== state.lastVideoTime && performance.now() - state.lastDetect > 45) {
       state.lastVideoTime = video.currentTime;
+      state.lastDetect = performance.now();
       const seen = onResult(state.landmarker.detectForVideo(video, performance.now()), true);
       if (seen) setHint("");
       else if (performance.now() - state.lastSeen > 400) { state.hand = null; setHint("Show the back of your hand"); }
