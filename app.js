@@ -11,7 +11,7 @@ const MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/h
 const FINGERS = { index: [5, 6, 1.05], middle: [9, 10, 1.07], ring: [13, 14, 1.0], pinky: [17, 18, 0.86] };
 // where the second ring of a set goes
 const NEIGHBOR = { index: "middle", middle: "ring", ring: "middle", pinky: "ring" };
-const RING_POS = 0.47;    // position between knuckle and middle joint
+const RING_POS = +(new URLSearchParams(location.search).get("fitpos") ?? 0.42);   // between knuckle and middle joint
 const SMOOTH = 0.5;       // landmark smoothing for live video
 
 const $ = (id) => document.getElementById(id);
@@ -26,6 +26,11 @@ const state = {
   w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0
 };
 state.color = state.ring.colors.includes(params.get("color")) ? params.get("color") : state.ring.colors[0];
+// Hand tracking only estimates how wide a finger is; on a hand held close or at an angle it can be off,
+// so the shopper can nudge the ring's size and the page remembers it.
+let stored = null;
+try { stored = localStorage.getItem("rinfit-fit"); } catch { /* private mode */ }
+state.fit = clampFit(+(params.get("fitscale") ?? stored ?? 1));
 window.__tryon = { ready: false, built: false, placed: false, error: null, debug: null };
 
 /* ---------- renderer & scenes ---------- */
@@ -322,6 +327,19 @@ function setHint(text) {
   if (text) hint.textContent = text;
 }
 
+function clampFit(v) {
+  return Math.min(1.4, Math.max(0.7, isFinite(v) && v > 0 ? v : 1));
+}
+
+function setFit(value) {
+  state.fit = clampFit(value);
+  $("fit-value").textContent = `${Math.round(state.fit * 100)}%`;
+  try { localStorage.setItem("rinfit-fit", String(state.fit)); } catch { /* private mode */ }
+}
+$("fit-down").onclick = () => setFit(state.fit - 0.06);
+$("fit-up").onclick = () => setFit(state.fit + 0.06);
+setFit(state.fit);
+
 for (const b of $("fingers").children) {
   b.onclick = () => {
     state.finger = b.dataset.f;
@@ -404,11 +422,17 @@ function placeOn(holder, finger, pts, spacing, palm) {
   const A = pts[ia].clone(), B = pts[ib].clone();
   const axis = new THREE.Vector3().subVectors(B, A).normalize();
   // Each measure shrinks when the hand turns away from the camera, so take the largest.
-  const fingerWidth = Math.max(spacing * 0.86, pts[0].distanceTo(pts[9]) * 0.185, A.distanceTo(B) * 0.42) * widthK;
+  const fingerWidth = Math.max(spacing * 0.86, pts[0].distanceTo(pts[9]) * 0.185, A.distanceTo(B) * 0.42) * widthK * state.fit;
   const scale = fingerWidth / (INNER_RADIUS * 2);
   const zAxis = palm.clone().sub(axis.clone().multiplyScalar(palm.dot(axis))).normalize();
   const xAxis = new THREE.Vector3().crossVectors(axis, zAxis).normalize();
   holder.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
+  window.__tryon.fit = {   // for the fit calibration script
+    finger, widthK, fingerWidth: +fingerWidth.toFixed(1),
+    bySpacing: +(spacing * 0.86 * widthK).toFixed(1),
+    byPalm: +(pts[0].distanceTo(pts[9]) * 0.185 * widthK).toFixed(1),
+    bySegment: +(A.distanceTo(B) * 0.42 * widthK).toFixed(1)
+  };
   // Long stacks move further up the finger so they do not sink into the knuckle.
   const seg = Math.max(A.distanceTo(B), 1);
   const t = Math.min(0.65, Math.max(RING_POS, 0.3 + ((holder.userData.bandLength || 6) / 2) * scale / seg));
@@ -434,6 +458,7 @@ function placeRing(srcW, srcH) {
   const unsure = Math.abs(vote) < spacing * 0.05;
   const palm = (unsure ? hand.handed === "Right" : vote > 0) ? raw.clone().negate() : raw.clone();
   const debug = { handed: hand.handed, vote: +(vote / spacing).toFixed(2), main: placeOn(arMain, state.finger, pts, spacing, palm) };
+  window.__tryon.landmarks = pts.map((p) => [+p.x.toFixed(1), +(-p.y).toFixed(1)]);   // stage pixels, y down
   if (state.hasSecond) debug.second = placeOn(arSecond, NEIGHBOR[state.finger], pts, spacing, palm);
   else arSecond.visible = false;
   window.__tryon.placed = true;
@@ -493,6 +518,7 @@ async function setMode(mode) {
   video.hidden = mode !== "live";
   $("flip").hidden = mode !== "live";
   $("shot").hidden = !ar;
+  $("fit").hidden = !ar;
   if (mode !== "live") stopCamera();
   if (mode !== "photo") photo.hidden = true;
   arMain.visible = arSecond.visible = false;
