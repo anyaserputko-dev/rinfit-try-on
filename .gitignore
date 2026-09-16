@@ -1,0 +1,8 @@
+# Rinfit product photos and video frames: reference only, not ours to publish
+blender/ref/
+# Blender working output (editable .blend files stay on the Mac)
+blender/out/
+blender/test/
+blender/rings/__pycache__/
+__pycache__/
+.DS_Store

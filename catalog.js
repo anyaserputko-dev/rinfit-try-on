@@ -46,6 +46,7 @@ export const RINGS = [
     colors: ["Blue", "Olive", "Red", "White"],
     view: "band",
     spec: { kind: "band", style: "step", width: 9, thickness: 2, finish: "matte", logo: true },
+    model: { url: "models/infinity-men.glb", bandLength: 9 },
     img: IMG("infman1050-1-9_18d13299-ebbd-4335-af4f-eb156df55e3e.jpg"),
     url: PDP("copy-of-mens-infinity-silicone-ring-soft-comfortable-durable-wedding-band-us-design-patent")
   },
@@ -54,6 +55,7 @@ export const RINGS = [
     colors: ["Light Gray", "Steel Blue"],
     view: "band",
     spec: { kind: "band", style: "dome", width: 9, thickness: 2, finish: "matte", innerStep: true, engrave: true },
+    model: { url: "models/step-edge.glb", bandLength: 9 },
     img: IMG("3_7c0bcd0d-3249-49bc-bb87-0ceab86d060c.jpg"),
     url: PDP("copy-of-inner-step-edge-collection-silicone-ring-for-men-patent-pending")
   },
@@ -63,6 +65,7 @@ export const RINGS = [
     palette: { "White": "#e9ecf1", "Ocean": "#2b6670" },
     view: "couture",
     spec: { kind: "chevron", width: 2.5, thickness: 2, amplitude: 4.8 /* est. */ },
+    model: { url: "models/couture.glb", bandLength: 6.1 },
     img: IMG("012_4da77e9a-5746-4fa3-9c15-6d8f81f5af33.jpg"),
     url: PDP("gift-ring-womens-couture-silicone-stackable-rings-stylish-design-comfortable-durable-wedding-band")
   },
@@ -71,6 +74,7 @@ export const RINGS = [
     colors: ["White and Silver", "Nude and Rose Gold", "Black and Silver"],
     view: "front",
     spec: { kind: "stone", cut: "oval", w: 8, l: 11, band: { width: 3, thickness: 2 }, mount: "high" },
+    model: { url: "models/oval.glb", bandLength: 3 },
     img: IMG("07_6365c2a0-4ca3-4672-9bfa-44dd1e56b4ae.jpg"),
     url: PDP("rinfit-thin-oval-cut")
   },
@@ -79,6 +83,7 @@ export const RINGS = [
     colors: ["Nude and Rose Gold", "White and Silver", "Black and Silver"],
     view: "threeq",
     spec: { kind: "stone", cut: "emerald", w: 8, l: 10, band: { width: 3, thickness: 2 }, mount: "high", engrave: true },
+    model: { url: "models/emerald.glb", bandLength: 3 },
     img: IMG("02_54337d16-8dd6-484d-8fdf-ac20182f73aa.jpg"),
     url: PDP("rinfit-thin-emerald-cut")
   },
@@ -87,6 +92,7 @@ export const RINGS = [
     colors: ["White and Silver", "Nude and Rose Gold", "Black and Silver"],
     view: "threeq",
     spec: { kind: "stone", cut: "emerald", w: 8, l: 10, band: { width: 6, thickness: 2, style: "dome" }, mount: "halo", engrave: true },
+    model: { url: "models/halo.glb", bandLength: 6 },
     img: IMG("020.jpg"),
     url: PDP("rinfit-halo-emerald-glowstone")
   },
@@ -97,6 +103,7 @@ export const RINGS = [
     palette: { "Pink": "#d9aca8", "Nude": "#ccb39f", "Ocean": "#2f6a73" },
     view: "threeq",
     spec: { kind: "stone", cut: "round", w: 7, l: 7, band: { width: 6 /* est. */, thickness: 2, style: "dome" }, mount: "basket", engrave: true, pair: "separate" },
+    model: { url: "models/solitaire.glb", bandLength: 6.2 },
     img: IMG("sst6.jpg"),
     url: PDP("2-ring-set-7mm-round-solitaire-cz-silicone-ring-glowstone")
   },
@@ -105,6 +112,7 @@ export const RINGS = [
     colors: ["Nude and Rose Gold", "White and Silver", "Pink and Rose Gold", "Orchid Ice and Rose Gold", "Black and Rose Gold"],
     view: "top",
     spec: { kind: "stone", cut: "princess", w: 8, l: 8, band: { width: 6, thickness: 2 }, mount: "low", thin: { width: 3 } },
+    model: { url: "models/princess.glb", bandLength: 9 },
     img: IMG("Ring130_0950014.jpg"),
     url: PDP("silicone-ring-stackable-princess-cut-cz-2rings-set-thin")
   },
@@ -112,7 +120,8 @@ export const RINGS = [
     id: "marquise", name: "Marquise Cut CZ · 14×7 mm", family: "GlowStone · 2-ring stack", price: 59.99,
     colors: ["Pink and Rose Gold", "Nude and Rose Gold", "White and Silver", "Orchid Ice and Rose Gold", "Soft Blue and Silver", "Black and Rose Gold"],
     view: "top",
-    spec: { kind: "stone", cut: "marquise", w: 7, l: 14, band: { width: 6, thickness: 2 }, mount: "low", thin: { width: 3 } },
+    spec: { kind: "stone", cut: "marquise", w: 7, l: 14, band: { width: 6, thickness: 2 }, mount: "low", thin: { width: 2.7 } },
+    model: { url: "models/marquise.glb", bandLength: 8.8 },
     img: IMG("Ring_130_093_004.jpg"),
     url: PDP("silicone-ring-stackable-marquise-cut-cz-2rings-set-thin")
   },
@@ -121,6 +130,7 @@ export const RINGS = [
     colors: ["Nude and Rose Gold", "White and Silver", "Orchid Ice and Rose Gold", "Pink and Rose Gold", "Soft Blue and Silver", "Black and Rose Gold", "Teal Ocean Rose Gold"],
     view: "top",
     spec: { kind: "stone", cut: "pear", w: 8, l: 12, band: { width: 6, thickness: 2 }, mount: "low", thin: { width: 3 } },
+    model: { url: "models/pear.glb", bandLength: 9.1 },
     img: IMG("02_0c7944f9-f6f3-480e-bfdd-c082475b7715.jpg"),
     url: PDP("silicone-ring-stackable-pear-cut-cz-2rings-set-thin")
   },
@@ -129,6 +139,7 @@ export const RINGS = [
     colors: ["Frosted Clear"],
     view: "front",
     spec: { kind: "stone", cut: "round", w: 7, l: 7, band: { width: 3, thickness: 2 }, mount: "high", frosted: true },
+    model: { url: "models/frosted.glb", bandLength: 3 },
     img: IMG("main_round2..jpg"),
     url: PDP("frosted-clear-round")
   },
@@ -138,6 +149,8 @@ export const RINGS = [
     view: "top",
     spec: { kind: "stone", cut: "oval", w: 8, l: 12, band: { width: 6, thickness: 2 }, mount: "low", blackStone: true,
             chevrons: { width: 2, amplitude: 2.6 /* est. */ } },
+    // bandLength is what rests on the finger (the stack round the back), not the V apex-to-apex span of 17.4
+    model: { url: "models/black-oval.glb", bandLength: 10.5 },
     img: IMG("01_2_86588659-a271-489c-829e-dfdde773c45e.jpg"),
     url: PDP("silicone-ring-stackable-set-14x7-mm-marquise-cut-cz-patent-pending-design-glowstone-collection-copy")
   }

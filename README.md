@@ -22,6 +22,23 @@ Product names, prices, color options and photos come from rinfit.com (15 Septemb
 - Palm or back of the hand is decided by anatomy (the thumb sits on the palm side), not by the handedness label, which is unreliable on photos.
 - A real GLB model can replace any procedural ring: add `model: { url, scale, bandLength }` to the product in `catalog.js`.
 
+## Exact ring models (Blender)
+
+Each ring is modelled in Blender 5.2 from its product page and images, then exported as GLB for the web app.
+
+- `blender/rinfit.py` — modelling library: band cross-sections from the product sizes, faceted stones with true planar facets (brilliant family on any outline: round, oval, marquise, pear, rectangle), claws, rails, engraved or embossed lettering, materials, jewellery light tent, camera, Cycles render, GLB export.
+- `blender/rings/<ring>.py` — one module per product: sizes and sources, setting details, camera views that match Rinfit's product renders.
+- `blender/build.py` — builds a ring headless, renders the views, saves an editable `.blend`, exports `models/<ring>.glb`:
+  `Blender -b --factory-startup -P blender/build.py -- ring=oval views=hero,nude export=1`
+- `blender/compare.py` — side-by-side sheet: Rinfit product render next to ours, both cropped to the object.
+- `blender/test_site.mjs` — headless check of the site (3D view and photo try-on) without a camera.
+
+Model contract with the app: millimetres, ring axis along +Y, stone towards +Z, inner diameter 17.32 mm (US 7). Material names say what to recolour per variant: `Silicone_A` / `Silicone_B` (band colours), `Metal` (Silver or Rose Gold), `CZ` / `CZ_Black` (stones).
+
+## Realtime stones
+
+`gem.js` ray-traces each main stone in the browser. A cut stone is a convex solid, so the shader takes the facet planes straight from the GLB, refracts the view ray in, bounces it off the facets (total internal reflection and Fresnel) and lets it out with a little dispersion. The environment is the same light tent as the Blender renders, so the site and the renders read alike, and it works over live video because nothing depends on what is behind the stone.
+
 ## Files
 
 | File | Purpose |

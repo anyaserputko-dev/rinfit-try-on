@@ -10,7 +10,7 @@ export const INNER_RADIUS = 8.66; // US size 7: 17.32 mm inner diameter (Rinfit 
 const luminance = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 
 // Silicone: soft satin, low reflections so pastel and dark colors keep their real tone.
-function siliconeMat(hex, finish) {
+export function siliconeMat(hex, finish) {
   const color = new THREE.Color(hex);
   const light = Math.min(1, luminance(color) * 1.6);
   return new THREE.MeshPhysicalMaterial({
@@ -22,18 +22,18 @@ function siliconeMat(hex, finish) {
     side: THREE.DoubleSide
   });
 }
-const frostedMat = () => new THREE.MeshPhysicalMaterial({
+export const frostedMat = () => new THREE.MeshPhysicalMaterial({
   color: "#eef2f3", roughness: 0.6, metalness: 0, transparent: true, opacity: 0.78,
   envMapIntensity: 0.45, side: THREE.DoubleSide
 });
-const metalMat = (name) => new THREE.MeshStandardMaterial({
+export const metalMat = (name) => new THREE.MeshStandardMaterial({
   color: METAL[name] || METAL.Silver, metalness: 1, roughness: 0.1, envMapIntensity: 1.85, side: THREE.DoubleSide
 });
 // Cut stone without real refraction (live video has nothing behind the stone to bend):
 // the inner layer shows the pavilion facets from inside as mirrors, the outer layer adds the glassy surface.
 let gemEnv = null;
 export function setGemEnvironment(texture) { gemEnv = texture; }
-function gemMeshes(geo, black, small = false) {
+export function gemMeshes(geo, black, small = false) {
   const inner = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
     color: black ? "#26262b" : "#ffffff", metalness: 1, roughness: 0.03, envMap: gemEnv,
     envMapIntensity: black ? 0.22 : small ? 2.4 : 1.5, flatShading: true, side: THREE.BackSide,

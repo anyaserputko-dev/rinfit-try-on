@@ -2,7 +2,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RINGS, METAL, parseColor, bandHex } from "./catalog.js";
-import { createRing, setGemEnvironment, INNER_RADIUS } from "./rings.js";
+import { createRing, setGemEnvironment, INNER_RADIUS, siliconeMat, frostedMat, metalMat, gemMeshes } from "./rings.js";
+import { stoneMaterial } from "./gem.js";
 
 const MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
@@ -124,7 +125,7 @@ function radialTexture() {
 function dispose(group) {
   group.traverse((o) => {
     if (o.userData.shared) return;
-    o.geometry?.dispose();
+    if (o.userData.ownsGeometry !== false) o.geometry?.dispose();   // GLB geometry stays in the model cache
     const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
     for (const m of mats) { m.map?.dispose(); m.dispose(); }
   });
@@ -132,19 +133,68 @@ function dispose(group) {
 }
 
 /* ---------- ring build ---------- */
-// A real GLB model (ring.model) replaces the procedural ring when it is available.
+// Models built in Blender (blender/rings/*.py) replace the procedural ring when ring.model is set.
+// Material names in the GLB say what each part is: Silicone_A / Silicone_B (band colours of the variant),
+// Metal (Silver or Rose Gold), CZ / CZ_Black (swapped for the realtime gem shader).
 const gltf = new GLTFLoader();
 const modelCache = new Map();
+
+function dressModel(ring, scene, band, second, metal) {
+  const root = scene.clone(true);
+  const swaps = [];
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const name = o.material?.name || "";
+    o.userData.shared = true;   // geometry belongs to the cached GLB
+    if (name.startsWith("Silicone")) {
+      const colorName = name.startsWith("Silicone_B") ? second : band;
+      o.material = ring.spec.frosted ? frostedMat() : siliconeMat(bandHex(ring, colorName), ring.spec.finish || "satin");
+      o.userData.shared = false;
+      o.userData.ownsGeometry = false;
+    } else if (name.startsWith("Metal")) {
+      o.material = metalMat(metal);
+      o.material.roughness = 0.28;   // same soft polish as the Blender renders
+      o.userData.shared = false;
+      o.userData.ownsGeometry = false;
+    } else if (name.startsWith("CZ")) {
+      swaps.push([o, name.startsWith("CZ_Black"), /pave/i.test(o.name)]);
+    }
+  });
+  for (const [o, black, small] of swaps) {
+    if (!small) {   // main stone: one convex solid, ray-traced against its own facets
+      o.material = stoneMaterial(o.geometry, { black });
+      o.userData.shared = false;
+      o.userData.ownsGeometry = false;
+      continue;
+    }
+    for (const g of gemMeshes(o.geometry, black, small)) {
+      g.position.copy(o.position);
+      g.quaternion.copy(o.quaternion);
+      g.scale.copy(o.scale);
+      g.userData.ownsGeometry = false;
+      o.parent.add(g);
+    }
+    o.removeFromParent();
+  }
+  root.scale.setScalar(ring.model.scale ?? 1);
+  const group = new THREE.Group();
+  group.add(root);
+  return group;
+}
+
 async function buildPiece(ring, color) {
   if (!ring.model) return createRing(ring, color);
   if (!modelCache.has(ring.model.url)) modelCache.set(ring.model.url, gltf.loadAsync(ring.model.url).then((g) => g.scene));
   const scene = await modelCache.get(ring.model.url);
-  const group = new THREE.Group();
-  const inst = scene.clone(true);
-  inst.traverse((o) => (o.userData.shared = true));
-  inst.scale.setScalar(ring.model.scale ?? 1);
-  group.add(inst);
-  return { group, bandLength: ring.model.bandLength ?? 6 };
+  const { bands, metals } = parseColor(color);
+  const bandLength = ring.model.bandLength ?? 6;
+  if (ring.spec.pair === "separate") {   // set of two separate rings: same model, second colour on the neighbouring finger
+    return {
+      group: dressModel(ring, scene, bands[0], bands[0], metals[0]), bandLength,
+      second: { group: dressModel(ring, scene, bands[1] ?? bands[0], bands[1] ?? bands[0], metals[1] ?? metals[0]), bandLength }
+    };
+  }
+  return { group: dressModel(ring, scene, bands[0], bands[1] ?? bands[0], metals[0]), bandLength };
 }
 
 function addToAr(holder, piece) {
@@ -174,11 +224,17 @@ function orient(obj, type) {
 }
 
 function setViewCamera(count) {
-  const dist = count > 1 ? 92 : 66;
+  // fit whatever is on the stage: a set of two rings is much wider than a single ring
+  const box = new THREE.Box3().setFromObject(viewHolder);
+  const radius = box.isEmpty() ? 20 : box.getSize(new THREE.Vector3()).length() / 2;
+  const centre = box.isEmpty() ? new THREE.Vector3(0, 2, 0) : box.getCenter(new THREE.Vector3());
+  const fov = THREE.MathUtils.degToRad(viewCam.fov);
+  const dist = Math.max(40, (radius / Math.tan(fov / 2)) * (count > 1 ? 1.25 : 1.35));
   const az = THREE.MathUtils.degToRad(+(params.get("az") ?? 0));
   const el = THREE.MathUtils.degToRad(+(params.get("el") ?? 17));
-  controls.target.set(0, 2, 0);
-  viewCam.position.set(Math.sin(az) * Math.cos(el) * dist, 2 + Math.sin(el) * dist, Math.cos(az) * Math.cos(el) * dist);
+  controls.target.copy(centre);
+  viewCam.position.set(centre.x + Math.sin(az) * Math.cos(el) * dist, centre.y + Math.sin(el) * dist,
+                       centre.z + Math.cos(az) * Math.cos(el) * dist);
   controls.update();
 }
 
@@ -195,8 +251,9 @@ async function rebuild() {
     const pivot = new THREE.Group();
     orient(p.group, state.ring.view);
     if (pieces.length > 1) {   // two rings of a set side by side, like the product photo
-      pivot.position.set(i ? 9 : -9, 0, i ? 4 : -4);
-      pivot.rotation.y = i ? -0.3 : 0.3;
+      const half = new THREE.Box3().setFromObject(p.group).getSize(new THREE.Vector3()).x / 2 + 1.5;
+      pivot.position.set(i ? half : -half, 0, i ? 3 : -3);
+      pivot.rotation.y = i ? -0.22 : 0.22;
     }
     pivot.add(p.group);
     viewHolder.add(pivot);
@@ -489,6 +546,11 @@ function resize() {
 
 function frame() {
   requestAnimationFrame(frame);
+  step();
+}
+
+// One frame of work. Exposed for headless tests, where requestAnimationFrame may never fire.
+function step() {
   resize();
   if (state.mode === "3d") {
     controls.update();
@@ -508,6 +570,7 @@ function frame() {
   }
   window.__tryon.ready = true;
 }
+window.__tryon.step = step;
 
 buildGrid();
 setViewCamera(1);

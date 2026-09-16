@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rinfit rings — product render vs our 3D model</title>
+<style>
+  :root { --ink:#373a36; --paper:#e9e4e1; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px 64px; background:var(--paper); color:var(--ink);
+         font:16px/1.5 "Kumbh Sans", system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { max-width:1100px; margin:0 auto 28px; }
+  h1 { font-size:26px; margin:0 0 8px; letter-spacing:-0.01em; }
+  p { margin:6px 0; max-width:70ch; }
+  a { color:#8a5a44; }
+  .note { font-size:14px; opacity:.8; }
+  main { max-width:1100px; margin:0 auto; display:grid; gap:26px; }
+  figure { margin:0; background:#fff; border-radius:14px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  figcaption { font-size:14px; padding:6px 4px 10px; display:flex; justify-content:space-between; gap:12px; }
+  figcaption b { font-weight:600; }
+  img { width:100%; height:auto; display:block; border-radius:8px; }
+  .legend { color:#8a5a44; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rinfit rings: product render vs our 3D model</h1>
+  <p>Every ring was rebuilt in Blender from its product page — band width and thickness, stone cut and size,
+     setting, engraving — and rendered from the same angle as Rinfit's own product image.
+     Left in each pair: rinfit.com. Right: our model.</p>
+  <p><a href="../">Open the virtual try-on →</a> &nbsp;·&nbsp; <a href="compare/all_rings.jpg">All rings on one sheet</a></p>
+  <p class="note">Concept prototype, not an official Rinfit page. Product images © Rinfit, used here for comparison.</p>
+</header>
+<main id="grid"></main>
+<script>
+const RINGS = [
+  ["oval", "Thin Oval Cut CZ · 11×8 mm"],
+  ["emerald", "Thin Emerald Cut CZ · 10×8 mm"],
+  ["halo", "Halo Emerald Cut CZ · 10×8 mm"],
+  ["solitaire", "Round Solitaire CZ · 7 mm, set of 2"],
+  ["princess", "Princess Cut CZ · 8×8 mm"],
+  ["marquise", "Marquise Cut CZ · 14×7 mm"],
+  ["pear", "Pear Cut CZ · 8×12 mm"],
+  ["frosted", "Frosted Clear · round CZ"],
+  ["black-oval", "Black Oval Cut CZ · 12×8 mm"],
+  ["couture", "Couture stackable · 2.5 mm"],
+  ["infinity-men", "Men's Infinity · 9 mm"],
+  ["step-edge", "Inner Step Edge · 9 mm"]
+];
+document.getElementById("grid").innerHTML = RINGS.map(([id, title]) => `
+  <figure>
+    <figcaption><b>${title}</b><span class="legend">left: rinfit.com · right: Blender</span></figcaption>
+    <img loading="lazy" alt="${title}: Rinfit product render next to our Blender render" src="compare/${id}_hero.jpg">
+  </figure>`).join("");
+</script>
+</body>
+</html>
