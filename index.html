@@ -38,6 +38,8 @@ button:focus-visible,a:focus-visible,label:focus-within{outline:2px solid var(--
 .stage video,.stage img.photo{z-index:1}
 .stage img.photo{object-fit:contain}
 .stage canvas{z-index:2}
+/* camera frames are soft and slightly noisy; a razor-sharp overlay reads as a sticker */
+.stage canvas.ar{filter:blur(.35px) saturate(.97)}
 .stage.mirror video,.stage.mirror canvas.ar{transform:scaleX(-1)}
 .modes{position:absolute;z-index:5;top:12px;left:50%;transform:translateX(-50%);display:flex;background:rgba(255,255,255,.88);backdrop-filter:blur(8px);border-radius:999px;padding:4px;gap:2px;box-shadow:0 1px 8px rgba(0,0,0,.08)}
 .modes button{border:0;background:transparent;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;white-space:nowrap}

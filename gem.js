@@ -151,7 +151,7 @@ export function stoneMaterial(geometry, { black = false } = {}) {
   const planes = all.slice(0, MAX_PLANES);
   const packed = Array.from({ length: MAX_PLANES }, (_, i) =>
     planes[i] ? new THREE.Vector4(planes[i].n.x, planes[i].n.y, planes[i].n.z, planes[i].d) : new THREE.Vector4());
-  return new THREE.ShaderMaterial({
+  const material = new THREE.ShaderMaterial({
     name: black ? "CZ_Black_traced" : "CZ_traced",
     uniforms: {
       uPlanes: { value: packed },
@@ -165,4 +165,8 @@ export function stoneMaterial(geometry, { black = false } = {}) {
     },
     vertexShader, fragmentShader
   });
+  // the app multiplies these by the light it samples from the camera frame
+  material.userData.baseTint = material.uniforms.uTint.value.clone();
+  material.userData.baseExposure = material.uniforms.uExposure.value;
+  return material;
 }
