@@ -65,15 +65,30 @@ for (const c of cases) {
         photo.naturalWidth * sc, photo.naturalHeight * sc);
     }
     g.drawImage(gl, 0, 0);
+    const edges = window.__tryon.edges;   // where the finger's edges were measured, in stage pixels
+    if (edges) {
+      const stage = document.getElementById("stage").getBoundingClientRect();
+      const k = out.width / stage.width;
+      g.strokeStyle = "#ff2d55";
+      g.lineWidth = 2;
+      for (const [x, y] of edges) {
+        const cx = x * k, cy = -y * k;
+        g.beginPath();
+        g.moveTo(cx - 9, cy); g.lineTo(cx + 9, cy);
+        g.moveTo(cx, cy - 9); g.lineTo(cx, cy + 9);
+        g.stroke();
+      }
+    }
     return out.toDataURL("image/png");
   }, c.frames || 30);
   const info = await page.evaluate(() => ({
     built: window.__tryon?.built, placed: window.__tryon?.placed, error: window.__tryon?.error, debug: window.__tryon?.debug,
+    fit: window.__tryon?.fit,
     hint: document.getElementById("hint").hidden ? "" : document.getElementById("hint").textContent
   }));
   const file = `${OUT}${c.name}.png`;
   fs.writeFileSync(file, Buffer.from(dataUrl.split(",")[1], "base64"));
-  console.log(`${c.name}: ${status} built=${info.built} placed=${info.placed} err=${info.error || "-"} debug=${JSON.stringify(info.debug)} hint="${info.hint}" -> ${file}`);
+  console.log(`${c.name}: ${status} built=${info.built} placed=${info.placed} err=${info.error || "-"} debug=${JSON.stringify(info.debug)} fit=${JSON.stringify(info.fit)} hint="${info.hint}" -> ${file}`);
   if (errors.length) console.log("  console:", [...new Set(errors)].slice(0, 8).join(" || "));
   await page.close();
 }

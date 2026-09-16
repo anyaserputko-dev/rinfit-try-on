@@ -419,11 +419,22 @@ function onResult(result, live) {
 // Map a normalized landmark to stage pixels. Live video fills the stage (cover),
 // photos are shown whole (contain) so no hand gets cropped away.
 const fitMode = () => (state.mode === "photo" ? "contain" : "cover");
-function mapper(srcW, srcH) {
+function frameFitInfo(srcW, srcH) {
   const sc = fitMode() === "contain" ? Math.min(state.w / srcW, state.h / srcH) : Math.max(state.w / srcW, state.h / srcH);
-  const ox = (state.w - srcW * sc) / 2, oy = (state.h - srcH * sc) / 2;
+  return { sc, ox: (state.w - srcW * sc) / 2, oy: (state.h - srcH * sc) / 2 };
+}
+function mapper(srcW, srcH) {
+  const { sc, ox, oy } = frameFitInfo(srcW, srcH);
   return (p) => new THREE.Vector3(ox + p.x * srcW * sc, -(oy + p.y * srcH * sc), -p.z * srcW * sc);
 }
+
+/* Reading the finger's real width off the camera frame was tried twice and dropped both times, so the ring's
+   size comes from the landmarks plus the shopper's own -/+ knob:
+     - by skin colour (walk out from the middle until the colour stops being skin): stops on the shading near
+       the edge, gave 21 px where the finger was ~33;
+     - by strongest change across the finger: latches onto the shadow between fingers or the next finger, gave
+       40 px on the same hand. Drawing the found edges over the photo showed them off the finger entirely.
+   Anything new here has to be checked the same way — overlay the edges it finds on a real photo first. */
 
 function placeOn(holder, finger, pts, spacing, palm, dt) {
   const [ia, ib, widthK] = FINGERS[finger];
@@ -435,12 +446,7 @@ function placeOn(holder, finger, pts, spacing, palm, dt) {
   const zAxis = palm.clone().sub(axis.clone().multiplyScalar(palm.dot(axis))).normalize();
   const xAxis = new THREE.Vector3().crossVectors(axis, zAxis).normalize();
   const quat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
-  window.__tryon.fit = {   // for the fit calibration script
-    finger, widthK, fingerWidth: +fingerWidth.toFixed(1),
-    bySpacing: +(spacing * 0.86 * widthK).toFixed(1),
-    byPalm: +(pts[0].distanceTo(pts[9]) * 0.185 * widthK).toFixed(1),
-    bySegment: +(A.distanceTo(B) * 0.42 * widthK).toFixed(1)
-  };
+  window.__tryon.fit = { finger, fingerWidth: +fingerWidth.toFixed(1), knob: state.fit };
   // Long stacks move further up the finger so they do not sink into the knuckle.
   const seg = Math.max(A.distanceTo(B), 1);
   const t = Math.min(0.65, Math.max(RING_POS, 0.3 + ((holder.userData.bandLength || 6) / 2) * scale / seg));
@@ -453,11 +459,15 @@ function placeOn(holder, finger, pts, spacing, palm, dt) {
   if (!f || NO_SMOOTH) {
     f = holder.userData.pose = { pos: pos.clone(), quat: quat.clone(), scale };
   } else {
-    const speed = f.pos.distanceTo(pos) / Math.max(dt, 0.001);   // stage pixels per second
+    const move = f.pos.distanceTo(pos);
+    const speed = move / Math.max(dt, 0.001);                    // stage pixels per second
     const rate = (base, k) => 1 - Math.exp(-dt * (base + speed * k));
-    f.pos.lerp(pos, rate(7, 0.05));
-    f.quat.slerp(quat, rate(6, 0.04));
-    f.scale += (scale - f.scale) * rate(3, 0.01);                // size changes slowest: it is the most visible wobble
+    // dead zones: below these the tracker is only breathing, and a ring that answers it never looks pinned
+    if (move > 0.5) f.pos.lerp(pos, rate(7, 0.05));
+    if (f.quat.angleTo(quat) > 0.009) f.quat.slerp(quat, rate(6, 0.04));       // ~0.5 degrees
+    if (Math.abs(scale - f.scale) > f.scale * 0.006) {
+      f.scale += (scale - f.scale) * rate(3, 0.01);              // size changes slowest: the most visible wobble
+    }
   }
   holder.position.copy(f.pos);
   holder.quaternion.copy(f.quat);
