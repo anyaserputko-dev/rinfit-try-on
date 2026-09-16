@@ -208,6 +208,7 @@ async function buildPiece(ring, color) {
 // 1.12 from a sweep against real hands: at 0.98 the band's ends curl out past the finger like horns,
 // at 1.12 they stop at the silhouette, at 1.18 the band is already eaten into.
 const OCC = +(new URLSearchParams(location.search).get("occ") ?? 1.12);
+const NO_SMOOTH = new URLSearchParams(location.search).get("smooth") === "0";   // for measuring the smoothing
 
 function addToAr(holder, piece) {
   const occluder = new THREE.Mesh(
@@ -424,7 +425,7 @@ function mapper(srcW, srcH) {
   return (p) => new THREE.Vector3(ox + p.x * srcW * sc, -(oy + p.y * srcH * sc), -p.z * srcW * sc);
 }
 
-function placeOn(holder, finger, pts, spacing, palm) {
+function placeOn(holder, finger, pts, spacing, palm, dt) {
   const [ia, ib, widthK] = FINGERS[finger];
   const A = pts[ia].clone(), B = pts[ib].clone();
   const axis = new THREE.Vector3().subVectors(B, A).normalize();
@@ -433,7 +434,7 @@ function placeOn(holder, finger, pts, spacing, palm) {
   const scale = fingerWidth / (INNER_RADIUS * 2);
   const zAxis = palm.clone().sub(axis.clone().multiplyScalar(palm.dot(axis))).normalize();
   const xAxis = new THREE.Vector3().crossVectors(axis, zAxis).normalize();
-  holder.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
+  const quat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
   window.__tryon.fit = {   // for the fit calibration script
     finger, widthK, fingerWidth: +fingerWidth.toFixed(1),
     bySpacing: +(spacing * 0.86 * widthK).toFixed(1),
@@ -443,17 +444,43 @@ function placeOn(holder, finger, pts, spacing, palm) {
   // Long stacks move further up the finger so they do not sink into the knuckle.
   const seg = Math.max(A.distanceTo(B), 1);
   const t = Math.min(0.65, Math.max(RING_POS, 0.3 + ((holder.userData.bandLength || 6) / 2) * scale / seg));
-  holder.position.copy(A.lerp(B, t));
-  holder.scale.setScalar(scale);
+  const pos = A.lerp(B, t);
+
+  // Hand tracking wobbles by a few pixels every frame, and tracking now runs slower than drawing.
+  // Smooth the ring's own pose instead of the landmarks: heavily while the hand is still, lightly while it
+  // moves, so the ring neither shivers in place nor lags behind a moving hand.
+  let f = holder.userData.pose;
+  if (!f || NO_SMOOTH) {
+    f = holder.userData.pose = { pos: pos.clone(), quat: quat.clone(), scale };
+  } else {
+    const speed = f.pos.distanceTo(pos) / Math.max(dt, 0.001);   // stage pixels per second
+    const rate = (base, k) => 1 - Math.exp(-dt * (base + speed * k));
+    f.pos.lerp(pos, rate(7, 0.05));
+    f.quat.slerp(quat, rate(6, 0.04));
+    f.scale += (scale - f.scale) * rate(3, 0.01);                // size changes slowest: it is the most visible wobble
+  }
+  holder.position.copy(f.pos);
+  holder.quaternion.copy(f.quat);
+  holder.scale.setScalar(f.scale);
   holder.visible = true;
-  return { finger, scale: +scale.toFixed(3), facing: +zAxis.z.toFixed(2) };
+  return { finger, scale: +f.scale.toFixed(3), facing: +zAxis.z.toFixed(2) };
 }
 
 function placeRing(srcW, srcH) {
   const hand = state.hand;
-  if (!hand || !srcW || !window.__tryon.built) { arMain.visible = arSecond.visible = false; return; }
+  const now = performance.now();
+  const dt = Math.min(0.1, Math.max(0.001, (now - (state.lastPlace || now)) / 1000));
+  state.lastPlace = now;
+  if (!hand || !srcW || !window.__tryon.built) {
+    arMain.visible = arSecond.visible = false;
+    arMain.userData.pose = arSecond.userData.pose = null;   // next hand starts in place, not flying in
+    return;
+  }
   const P = mapper(srcW, srcH);
   const pts = hand.lms.map((p) => P(p));
+  // test hook: shake the landmarks the way live tracking does, to measure what the smoothing removes
+  const shake = +(window.__tryon.jitter || 0);
+  if (shake) for (const p of pts) { p.x += (Math.random() - 0.5) * shake; p.y += (Math.random() - 0.5) * shake; }
   const spacing = (pts[5].distanceTo(pts[9]) + pts[9].distanceTo(pts[13]) + pts[13].distanceTo(pts[17])) / 3;
   // Normal of the back of the hand. The handedness label is unreliable on photos, so decide by anatomy:
   // the thumb and curled fingertips sit on the palm side of the wrist–knuckle plane.
@@ -462,12 +489,25 @@ function placeRing(srcW, srcH) {
   for (const [k, w] of [[2, 1], [3, 1], [4, 1], [8, 0.4], [12, 0.4], [16, 0.4], [20, 0.4]]) {
     vote += w * new THREE.Vector3().subVectors(pts[k], pts[0]).dot(raw);
   }
-  const unsure = Math.abs(vote) < spacing * 0.05;
-  const palm = (unsure ? hand.handed === "Right" : vote > 0) ? raw.clone().negate() : raw.clone();
-  const debug = { handed: hand.handed, vote: +(vote / spacing).toFixed(2), main: placeOn(arMain, state.finger, pts, spacing, palm) };
+  // Keep the previous answer until the evidence is clearly the other way: near the flip point this vote
+  // flickers from frame to frame and the ring used to spin 180 degrees on the finger.
+  const v = vote / spacing;
+  if (state.palmSign === undefined) state.palmSign = (Math.abs(v) < 0.05 ? hand.handed === "Right" : v > 0) ? 1 : -1;
+  if (v > 0.12) state.palmSign = 1;
+  else if (v < -0.12) state.palmSign = -1;
+  const palm = state.palmSign > 0 ? raw.clone().negate() : raw.clone();
+  // A finger pointing at the camera or curled up gives a segment barely a few pixels long: its direction is
+  // noise, so hold the last good pose instead of throwing the ring around.
+  const reliable = (f) => pts[FINGERS[f][0]].distanceTo(pts[FINGERS[f][1]]) > spacing * 0.45;
+  const debug = { handed: hand.handed, vote: +v.toFixed(2), sign: state.palmSign };
+  if (reliable(state.finger)) debug.main = placeOn(arMain, state.finger, pts, spacing, palm, dt);
+  else debug.main = arMain.userData.pose ? "held" : (arMain.visible = false);
   window.__tryon.landmarks = pts.map((p) => [+p.x.toFixed(1), +(-p.y).toFixed(1)]);   // stage pixels, y down
-  if (state.hasSecond) debug.second = placeOn(arSecond, NEIGHBOR[state.finger], pts, spacing, palm);
-  else arSecond.visible = false;
+  if (state.hasSecond && reliable(NEIGHBOR[state.finger])) {
+    debug.second = placeOn(arSecond, NEIGHBOR[state.finger], pts, spacing, palm, dt);
+  } else if (!state.hasSecond) {
+    arSecond.visible = false;
+  }
   window.__tryon.placed = true;
   window.__tryon.debug = debug;
 }
@@ -536,6 +576,7 @@ async function setMode(mode) {
   if (mode !== "live") stopCamera();
   if (mode !== "photo") photo.hidden = true;
   arMain.visible = arSecond.visible = false;
+  arMain.userData.pose = arSecond.userData.pose = null;
   state.hand = null;
 
   if (mode === "3d") setHint("Drag to rotate · pinch to zoom");
