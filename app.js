@@ -202,9 +202,16 @@ async function buildPiece(ring, color) {
   return { group: dressModel(ring, scene, bands[0], bands[1] ?? bands[0], metals[0]), bandLength };
 }
 
+// How much of the band the finger swallows. At 0.98 the ring is a hoop drawn over the skin and its sides
+// stick out past the finger like a bar; a finger is not a cylinder, so a slightly fatter occluder tucks the
+// sides away and the band reads as passing behind the finger.
+// 1.12 from a sweep against real hands: at 0.98 the band's ends curl out past the finger like horns,
+// at 1.12 they stop at the silhouette, at 1.18 the band is already eaten into.
+const OCC = +(new URLSearchParams(location.search).get("occ") ?? 1.12);
+
 function addToAr(holder, piece) {
   const occluder = new THREE.Mesh(
-    new THREE.CylinderGeometry(INNER_RADIUS * 0.98, INNER_RADIUS * 0.98, piece.bandLength + 60, 40),
+    new THREE.CylinderGeometry(INNER_RADIUS * OCC, INNER_RADIUS * OCC, piece.bandLength + 60, 40),
     new THREE.MeshBasicMaterial({ colorWrite: false })
   );
   occluder.renderOrder = -1;
