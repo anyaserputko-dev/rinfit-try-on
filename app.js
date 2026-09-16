@@ -211,25 +211,17 @@ function addToAr(holder, piece) {
     new THREE.MeshBasicMaterial({ colorWrite: false })
   );
   occluder.renderOrder = -1;
-  holder.add(occluder, piece.group);
+  // Soft contact shadow on the skin under the band. Drawn before the ring, straight onto the transparent
+  // canvas, so it darkens the camera image underneath — without it the ring reads as a sticker.
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(INNER_RADIUS * 2.7, piece.bandLength * 2.1 + 3),
+    new THREE.MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false,
+                                  opacity: +(params.get("shadow") ?? 0.45) })
+  );
+  shadow.position.z = INNER_RADIUS * 0.72;
+  shadow.renderOrder = -2;
+  holder.add(shadow, occluder, piece.group);
   holder.userData.bandLength = piece.bandLength;
-  // Soft contact shadow on the skin under the band, drawn before the ring straight onto the transparent
-  // canvas, so it darkens the camera image underneath. It lives in the scene, not under the ring: as a child
-  // it turned with the ring and went edge-on — invisible — whenever the hand was rotated.
-  if (!holder.userData.shadow) {
-    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({
-      map: shadowTexture(), transparent: true, depthWrite: false, depthTest: false,
-      opacity: +(params.get("shadow") ?? 0.55)
-    }));
-    shadow.renderOrder = -3;
-    shadow.visible = false;
-    arScene.add(shadow);
-    holder.userData.shadow = shadow;
-  }
-}
-
-function hideShadows() {
-  for (const h of [arMain, arSecond]) if (h.userData.shadow) h.userData.shadow.visible = false;
 }
 
 // Shadow of a ring on skin: darkest right where the band meets the finger, fading along the finger,
@@ -521,19 +513,12 @@ function placeOn(holder, finger, pts, spacing, palm) {
   holder.position.copy(A.lerp(B, t));
   holder.scale.setScalar(scale);
   holder.visible = true;
-  const shadow = holder.userData.shadow;
-  if (shadow) {   // flat on the screen, aligned with the finger, a little wider than the band
-    shadow.position.set(holder.position.x, holder.position.y, -100);
-    shadow.rotation.z = Math.atan2(axis.y, axis.x) - Math.PI / 2;
-    shadow.scale.set(fingerWidth * 1.35, (holder.userData.bandLength || 6) * scale * 2.6 + 10, 1);
-    shadow.visible = true;
-  }
   return { finger, scale: +scale.toFixed(3), facing: +zAxis.z.toFixed(2) };
 }
 
 function placeRing(srcW, srcH) {
   const hand = state.hand;
-  if (!hand || !srcW || !window.__tryon.built) { arMain.visible = arSecond.visible = false; hideShadows(); return; }
+  if (!hand || !srcW || !window.__tryon.built) { arMain.visible = arSecond.visible = false; return; }
   const P = mapper(srcW, srcH);
   const pts = hand.lms.map((p) => P(p));
   const spacing = (pts[5].distanceTo(pts[9]) + pts[9].distanceTo(pts[13]) + pts[13].distanceTo(pts[17])) / 3;
@@ -549,10 +534,7 @@ function placeRing(srcW, srcH) {
   const debug = { handed: hand.handed, vote: +(vote / spacing).toFixed(2), main: placeOn(arMain, state.finger, pts, spacing, palm) };
   window.__tryon.landmarks = pts.map((p) => [+p.x.toFixed(1), +(-p.y).toFixed(1)]);   // stage pixels, y down
   if (state.hasSecond) debug.second = placeOn(arSecond, NEIGHBOR[state.finger], pts, spacing, palm);
-  else {
-    arSecond.visible = false;
-    if (arSecond.userData.shadow) arSecond.userData.shadow.visible = false;
-  }
+  else arSecond.visible = false;
   window.__tryon.placed = true;
   window.__tryon.debug = debug;
 }
@@ -614,7 +596,6 @@ async function setMode(mode) {
   if (mode !== "live") stopCamera();
   if (mode !== "photo") photo.hidden = true;
   arMain.visible = arSecond.visible = false;
-  hideShadows();
   state.hand = null;
 
   if (mode === "3d") setHint("Drag to rotate · pinch to zoom");
