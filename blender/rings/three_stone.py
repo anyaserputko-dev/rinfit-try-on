@@ -31,18 +31,24 @@ CENTER = 6.95                   # centre stone diameter (mm)
 SIDE = 4.70                     # side stone diameter
 GAP = 0.15                      # between neighbouring girdles
 GIRDLE_H = 2.30                 # girdle plane over the crown of the band
-RAIL = dict(h=0.85, half_w=2.05, over=0.70, taper=9.0)   # height over the band, half width, run past the
+RAIL = dict(h=0.85, half_w=1.55, over=0.70, taper=9.0)   # height over the band, half width, run past the
 #                                                          outer stone edge, degrees of end taper
 STONE = dict(table=0.56, star=0.78, crown=0.15, pavilion=0.435, lower=0.23, sectors=8, pav_sectors=8)
 CLAW = dict(radius=0.30, tip=(0.46, 0.46, 0.62), lean=0.26, tip_height=0.62, back=0.50)
-TEXT = dict(size=2.9, depth=0.16, spacing=1.05, rotate=0.0)
-TEXT_PHI = math.radians(52.0)  # where RINFIT sits round the band, measured from the stones
+TEXT = dict(size=2.4, depth=0.16, spacing=1.05, rotate=0.0)
+TEXT_PHI = math.radians(-45.0)  # where RINFIT sits round the band, measured from the stones
 
 HERO = dict(direction=(0.0, -0.3420, 0.9397), up=(0.0872, 0.0, 0.9962), target=(0, 0, 2.5), dist=60, lens=85)
 VIEWS = {
     "hero": dict(camera=HERO, frame=False, color="Nude and Rose Gold"),
     "white": dict(camera=HERO, frame=False, color="White and Silver"),
     "black": dict(camera=HERO, frame=False, color="Black and Silver"),
+    "beauty": dict(frame=False, color="Nude and Rose Gold", camera=dict(
+        direction=(0.42, -0.58, 0.70), up=(0.20, 0.14, 0.97), target=(0, 0, 3.0), dist=62, lens=85)),
+    "profile": dict(frame=False, color="Nude and Rose Gold", camera=dict(
+        direction=(0.0, -0.10, 0.995), up=(0.30, 0.95, 0.0), target=(0, 0, 4.0), dist=64, lens=85)),
+    "macro": dict(frame=False, color="Nude and Rose Gold", camera=dict(
+        direction=(0.0, -0.45, 0.89), up=(0.26, 0.0, 0.97), target=(0, 0, 11.0), dist=42, lens=95)),
     "side": dict(camera=dict(direction=(1, 0.12, 0.3), up=(0, 0, 1), dist=200, lens=100), scene="glb"),
     "top": dict(camera=dict(direction=(0.02, -0.08, 1), up=(0, 1, 0), dist=200, lens=100), scene="glb"),
 }
@@ -174,3 +180,20 @@ def build(L, color, scene="hero"):
 
 
 
+
+
+
+
+# --- тимчасове: де насправді стоїть RINFIT -----------------------------------------------------
+_COMBOS = [(0, -1.9), (18, -1.9), (34, -1.9), (0, -1.2), (18, -1.2), (34, -1.2)]
+for _i, (_pd, _yc) in enumerate(_COMBOS):
+    VIEWS["t%d" % _i] = dict(camera=HERO, frame=False, color="Nude and Rose Gold",
+                             scene="t_%d_%d" % (_pd, int(_yc * 10)))
+_build = build
+def build(L, color, scene="hero"):
+    global TEXT_PHI, TEXT
+    if scene.startswith("t_"):
+        _, pd, yc = scene.split("_")
+        TEXT_PHI = math.radians(float(pd))
+        TEXT = dict(TEXT, y_center=float(yc) / 10.0)
+    return _build(L, color, scene="hero")

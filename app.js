@@ -23,7 +23,7 @@ const state = {
   ring: RINGS.find((r) => r.id === params.get("ring")) || RINGS[4],
   color: null, finger: params.get("finger") || "ring", mode: "3d", facing: "user",
   stream: null, landmarker: null, lmMode: null, hand: null, lastSeen: 0, lastVideoTime: -1, lastDetect: 0,
-  w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0
+  w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }
 };
 state.color = state.ring.colors.includes(params.get("color")) ? params.get("color") : state.ring.colors[0];
 // Hand tracking only estimates how wide a finger is; on a hand held close or at an angle it can be off,
@@ -238,6 +238,9 @@ function addToAr(holder, piece) {
     new THREE.CylinderGeometry(INNER_RADIUS * OCC, INNER_RADIUS * OCC, piece.bandLength + 60, 40),
     new THREE.MeshBasicMaterial({ colorWrite: false })
   );
+  // A finger is wider than it is deep, so the hider is an oval, not a circle: a round one either lets the
+  // band's ends stick out past the silhouette or eats the band where it crosses the top of the finger.
+  occluder.scale.set(1, 1, 0.85);
   occluder.renderOrder = -1;
   holder.add(occluder, piece.group);
   holder.userData.bandLength = piece.bandLength;
@@ -372,6 +375,52 @@ $("fit-down").onclick = () => setFit(state.fit - 0.06);
 $("fit-up").onclick = () => setFit(state.fit + 0.06);
 setFit(state.fit);
 
+/* ---------- putting it on by hand ----------
+   Tracking gets the ring near the right place; the shopper finishes the job the way they would in front of a
+   mirror: drag it along the finger, pinch to size it. Photo mode is where this matters — the hand is still. */
+const touches = new Map();
+let pinchFrom = 0;
+
+function resetAdjust() {
+  state.offset.x = state.offset.y = 0;
+  touches.clear();
+  pinchFrom = 0;
+}
+
+stage.addEventListener("pointerdown", (e) => {
+  if (state.mode === "3d" || !$("shot-card").hidden || !$("photo-intro").hidden) return;
+  if (e.target.closest("button, .modes, .fingers, .fit")) return;   // the controls keep their taps
+  stage.setPointerCapture(e.pointerId);
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    pinchFrom = Math.hypot(a.x - b.x, a.y - b.y);
+  }
+});
+
+stage.addEventListener("pointermove", (e) => {
+  const was = touches.get(e.pointerId);
+  if (!was) return;
+  const now = { x: e.clientX, y: e.clientY };
+  touches.set(e.pointerId, now);
+  if (touches.size === 1) {
+    state.offset.x += now.x - was.x;
+    state.offset.y -= now.y - was.y;          // stage y counts upwards
+  } else if (touches.size === 2 && pinchFrom > 8) {
+    const [a, b] = [...touches.values()];
+    const span = Math.hypot(a.x - b.x, a.y - b.y);
+    setFit(state.fit * (span / pinchFrom));
+    pinchFrom = span;
+  }
+});
+
+for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+  stage.addEventListener(type, (e) => {
+    touches.delete(e.pointerId);
+    if (touches.size < 2) pinchFrom = 0;
+  });
+}
+
 for (const b of $("fingers").children) {
   b.onclick = () => {
     state.finger = b.dataset.f;
@@ -485,11 +534,14 @@ function placeOn(holder, finger, pts, W, m, palm, dt) {
   const zAxis = palm.clone().sub(axis.clone().multiplyScalar(palm.dot(axis))).normalize();
   const xAxis = new THREE.Vector3().crossVectors(axis, zAxis).normalize();
   const quat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
-  window.__tryon.fit = { finger, fingerWidth: +fingerWidth.toFixed(1), knob: state.fit };
+  window.__tryon.fit = { finger, fingerWidth: +fingerWidth.toFixed(1), knob: +state.fit.toFixed(3),
+                         offset: [Math.round(state.offset.x), Math.round(state.offset.y)] };
   // Long stacks move further up the finger so they do not sink into the knuckle.
   const seg = Math.max(A.distanceTo(B), 1);
   const t = Math.min(0.65, Math.max(RING_POS, 0.3 + ((holder.userData.bandLength || 6) / 2) * scale / seg));
   const pos = A.lerp(B, t);
+  pos.x += state.offset.x;      // where the shopper dragged it
+  pos.y += state.offset.y;
 
   // Hand tracking wobbles by a few pixels every frame, and tracking now runs slower than drawing.
   // Smooth the ring's own pose instead of the landmarks: heavily while the hand is still, lightly while it
@@ -639,21 +691,27 @@ async function startCamera() {
 
 async function loadPhoto(src) {
   photo.hidden = false;
+  $("photo-intro").hidden = true;
   arMain.visible = arSecond.visible = false;
   state.hand = null;
+  resetAdjust();
   setHint("Finding your hand…");
   photo.src = src;
   try { await photo.decode(); } catch { setHint("This image could not be opened"); return; }
   const lm = await getLandmarker("IMAGE").catch(() => null);
   if (!lm) return;
   const found = onResult(lm.detect(photo), false);
-  setHint(found ? "" : "No hand found — try a photo with the back of the hand");
+  setHint(found ? "Drag the ring · pinch to resize" : "No hand found — try a photo with the back of the hand");
 }
 
-$("file").onchange = (e) => {
-  const f = e.target.files?.[0];
-  if (f) loadPhoto(URL.createObjectURL(f));
-};
+for (const id of ["file", "file-cam"]) {
+  $(id).onchange = (e) => {
+    const f = e.target.files?.[0];
+    if (f) loadPhoto(URL.createObjectURL(f));
+  };
+}
+$("intro-camera").onclick = () => $("file-cam").click();
+$("intro-gallery").onclick = () => $("file").click();
 
 async function setMode(mode) {
   state.mode = mode;
@@ -665,6 +723,9 @@ async function setMode(mode) {
   $("flip").hidden = mode !== "live";
   $("shot").hidden = !ar;
   $("shot-card").hidden = true;
+  $("photo-intro").hidden = true;
+  controls.enabled = mode === "3d";   // in try-on a drag moves the ring, it does not orbit the camera
+  resetAdjust();
   $("fit").hidden = !ar;
   if (mode !== "live") stopCamera();
   if (mode !== "photo") photo.hidden = true;
@@ -675,8 +736,10 @@ async function setMode(mode) {
   if (mode === "3d") setHint("Drag to rotate · pinch to zoom");
   if (mode === "live") startCamera();
   if (mode === "photo") {
+    // first the shopper is shown how to hold the hand, then they shoot, then they put the ring on by hand
     if (params.get("photo") && !photo.dataset.used) { photo.dataset.used = "1"; loadPhoto(params.get("photo")); }
-    else { setHint("Upload a photo of your hand"); photo.hidden = !photo.src; $("file").click(); if (photo.src) loadPhoto(photo.src); }
+    else if (photo.src) { photo.hidden = false; loadPhoto(photo.src); }
+    else { setHint(""); $("photo-intro").hidden = false; }
   }
 }
 $("mode-3d").onclick = () => setMode("3d");
