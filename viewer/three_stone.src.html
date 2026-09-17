@@ -355,6 +355,12 @@ window.__viewer = {
   get loaded() { return !!ring; },
   step() { controls.update(); renderer.render(scene, camera); },
   colour(i) { applyColour(COLOURS[i]); },
+  spin(a) {                                   // тест: обернути камеру навколо осі пальця
+    const v = new THREE.Vector3().subVectors(camera.position, controls.target);
+    v.applyAxisAngle(new THREE.Vector3(0, 0, 1), a);
+    camera.position.copy(controls.target).add(v);
+    controls.update();
+  },
   png() { return renderer.domElement.toDataURL("image/png"); }
 };
 
