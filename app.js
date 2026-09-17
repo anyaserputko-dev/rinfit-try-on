@@ -629,9 +629,13 @@ function placeRing(srcW, srcH) {
   // the same space as the ring's axis — the picture — otherwise the two disagree and the ring rolls round the
   // finger until the stone slides off its middle. Which face of the hand this is was already settled above
   // from the metric landmarks, which is what they are good for.
-  const rawSeen = new THREE.Vector3().subVectors(pts[5], pts[0])
-    .cross(new THREE.Vector3().subVectors(pts[17], pts[0])).normalize();
-  const palm = state.isRight ? rawSeen : rawSeen.negate();
+  // Both readings of that direction carry the tracker's depth guess, which is rough, and a few degrees of
+  // error there rolls the ring round the finger until the stone sits on its edge. What a shopper wants is
+  // plain: the stone in the middle of the finger, facing them. So the stone is aimed straight at the lens,
+  // and the metric landmarks keep only the one call they make reliably — back of the hand, or palm, which
+  // decides whether the stone shows at all.
+  const towardsCamera = (state.isRight ? raw.z : -raw.z) >= 0 ? 1 : -1;
+  const palm = new THREE.Vector3(0, 0, towardsCamera);
   // A finger pointing at the camera or curled up gives a segment barely a few pixels long: its direction is
   // noise, so hold the last good pose instead of throwing the ring around.
   // A finger folded into a fist has no place to wear a ring that the camera can see: its knuckle segment
