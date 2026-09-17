@@ -189,7 +189,7 @@ function dressModel(ring, scene, band, second, metal) {
   for (const [o, black, small] of swaps) {
     if (!small) {   // main stone: one convex solid, ray-traced against its own facets
       o.material = gemBroken ? simpleStoneMaterial({ black })
-                             : stoneMaterial(o.geometry, { black, budget: GEM_BUDGET, bounces: GEM_BOUNCES });
+                             : stoneMaterial(o.geometry, { black, bounces: GEM_BOUNCES });
       if (!gemBroken) tracedStones.add(o);
       o.userData.shared = false;
       o.userData.ownsGeometry = false;

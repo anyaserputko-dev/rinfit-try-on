@@ -101,6 +101,25 @@ def masks(px):
             crop(al & (rgb[..., 1] > 0.35) & (rgb[..., 0] < 0.35)))      # тунель (зелений)
 
 
+def hole_fraction(m):
+    """Скільки силуету — наскрізний отвір. На фото крізь каблучку НЕ видно, тож будь-яка діра = помилка."""
+    h, w = m.shape
+    seen = np.zeros_like(m)
+    stack = [(y, x) for x in range(w) for y in (0, h - 1) if not m[y, x]]
+    stack += [(y, x) for y in range(h) for x in (0, w - 1) if not m[y, x]]
+    for y, x in stack:
+        seen[y, x] = True
+    while stack:
+        y, x = stack.pop()
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < h and 0 <= nx < w and not m[ny, nx] and not seen[ny, nx]:
+                seen[ny, nx] = True
+                stack.append((ny, nx))
+    holes = (~m & ~seen).sum()
+    return float(holes / max(m.sum() + holes, 1))
+
+
 def iou(a, b):
     u = (a | b).sum()
     return float((a & b).sum() / u) if u else 0.0
@@ -112,7 +131,7 @@ def score(p):
     if m is None:
         return -1, (0, 0, 0)
     s = tuple(iou(m[i], REF[i]) for i in range(3))
-    return 0.40 * s[0] + 0.30 * s[1] + 0.30 * s[2], s
+    return 0.40 * s[0] + 0.30 * s[1] + 0.30 * s[2] - 0.8 * hole_fraction(m[0]), s
 
 
 P = dict(alpha=40.0, beta=90.0, roll=0.0, dist=95.0, dome=0.95, edge_out=1.70, edge_in=0.55,
@@ -138,6 +157,16 @@ for al in (58, 64, 70, 76, 82):
 P.update(alpha=grid_p[0], beta=grid_p[1], roll=grid_p[2])
 print("СІТКА: кут %d° азимут %d° крен %d° -> %.4f (сил %.3f смуга %.3f тунель %.3f)"
       % (*grid_p[:3], grid_best, *grid_p[3]), flush=True)
+
+# окремо перебрати, ДЕ на кільці сидить смуга — крок спуску по колу надто дрібний, щоб її знайти
+sweep_best, sweep_phi = -1, P["strip_phi"]
+for phi in range(0, 360, 12):
+    P["strip_phi"] = phi
+    s_, _ = score(P)
+    if s_ > sweep_best:
+        sweep_best, sweep_phi = s_, phi
+P["strip_phi"] = sweep_phi
+print("СМУГА: phi = %d° -> %.4f" % (sweep_phi, sweep_best), flush=True)
 
 best, parts = score(P)
 print("СТАРТ %.4f  силует %.3f смуга %.3f тунель %.3f" % (best, *parts), flush=True)
