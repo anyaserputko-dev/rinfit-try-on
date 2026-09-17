@@ -3,7 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RINGS, METAL, parseColor, bandHex } from "./catalog.js";
 import { createRing, setGemEnvironment, INNER_RADIUS, siliconeMat, frostedMat, metalMat, gemMeshes } from "./rings.js";
-import { stoneMaterial } from "./gem.js";
+import { stoneMaterial, simpleStoneMaterial } from "./gem.js";
 
 const MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
@@ -38,6 +38,27 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true,
 renderer.setPixelRatio(Math.min(devicePixelRatio, 3));   // phones are 3x: at 2x the ring looks soft next to the video
 renderer.toneMapping = THREE.NeutralToneMapping;   // keeps pastel silicone colors true to the product photos
 renderer.toneMappingExposure = 1.0;
+// The traced stone keeps its facet planes in a fragment uniform array. Phones have far less room for those
+// than a desktop (iOS reports 1024 vectors against 4096 here), so ask the device how much it has and leave
+// headroom for three.js's own uniforms; anything over budget falls back to the simple faceted stone.
+const GEM_BUDGET = Math.max(64, Math.floor((renderer.capabilities.maxFragmentUniforms || 1024) * 0.35));
+const GEM_BOUNCES = renderer.capabilities.maxFragmentUniforms > 2048 ? 7 : 5;
+const tracedStones = new Set();
+let gemBroken = new URLSearchParams(location.search).get("gem") === "simple" ? "forced by ?gem=simple" : null;
+// Documented three.js hook: fires when a program fails to compile or link instead of silently drawing nothing.
+renderer.debug.onShaderError = (gl, program, vs, fs) => {
+  const log = (gl.getShaderInfoLog(fs) || gl.getShaderInfoLog(vs) || gl.getProgramInfoLog(program) || "").trim();
+  gemBroken = log.slice(0, 300) || "shader compile failed";
+  console.warn("shader failed, falling back to the simple stone:", gemBroken);
+};
+function useSimpleStones() {
+  for (const o of tracedStones) {
+    const black = o.material?.userData?.gem?.black;
+    o.material?.dispose?.();
+    o.material = simpleStoneMaterial({ black });
+  }
+  tracedStones.clear();
+}
 // Jewellery studio: grey room with bright softboxes, so metal reads as polished and facets flash white.
 function studioEnvironment() {
   const scene = new THREE.Scene();
@@ -167,7 +188,9 @@ function dressModel(ring, scene, band, second, metal) {
   });
   for (const [o, black, small] of swaps) {
     if (!small) {   // main stone: one convex solid, ray-traced against its own facets
-      o.material = stoneMaterial(o.geometry, { black });
+      o.material = gemBroken ? simpleStoneMaterial({ black })
+                             : stoneMaterial(o.geometry, { black, budget: GEM_BUDGET, bounces: GEM_BOUNCES });
+      if (!gemBroken) tracedStones.add(o);
       o.userData.shared = false;
       o.userData.ownsGeometry = false;
       continue;
@@ -643,6 +666,7 @@ function frame() {
 // One frame of work. Exposed for headless tests, where requestAnimationFrame may never fire.
 function step() {
   resize();
+  if (gemBroken && tracedStones.size) useSimpleStones();
   if (state.mode === "3d") {
     controls.update();
     renderer.render(viewScene, viewCam);
@@ -663,6 +687,26 @@ function step() {
     renderer.render(arScene, arCam);
   }
   window.__tryon.ready = true;
+}
+// ?diag=1 — one tap on a phone tells us what the device actually did with the stone shader.
+function diagnostics() {
+  const c = renderer.capabilities, gl = renderer.getContext();
+  const stone = [...tracedStones][0]?.material?.userData?.gem;
+  return {
+    gpu: gl.getParameter(gl.getExtension("WEBGL_debug_renderer_info")?.UNMASKED_RENDERER_WEBGL || gl.RENDERER),
+    webgl2: c.isWebGL2, fragUniformVectors: c.maxFragmentUniforms, budget: GEM_BUDGET, bounces: GEM_BOUNCES,
+    ring: state.ring.id, stone: stone || (gemBroken ? "simple (shader failed)" : "simple"),
+    shaderError: gemBroken || null, pixelRatio: renderer.getPixelRatio(), camera: window.__tryon.camera || null
+  };
+}
+window.__tryon.diagnostics = diagnostics;
+if (params.get("diag") === "1") {
+  const box = document.createElement("pre");
+  box.style.cssText = "position:fixed;left:8px;right:8px;bottom:8px;z-index:99;margin:0;padding:10px 12px;" +
+    "background:rgba(20,20,20,.92);color:#eee;font:11px/1.5 ui-monospace,Menlo,monospace;border-radius:10px;" +
+    "white-space:pre-wrap;max-height:45vh;overflow:auto";
+  document.body.appendChild(box);
+  setInterval(() => { box.textContent = JSON.stringify(diagnostics(), null, 1); }, 700);
 }
 window.__tryon.step = step;
 

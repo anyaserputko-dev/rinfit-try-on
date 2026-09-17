@@ -5,9 +5,12 @@
 // renders (blender/rinfit.py _tent_world + soft boxes), set in view space, so web and renders read alike.
 import * as THREE from "three";
 
-// A 16-sector stone has ~180 facet planes; rectangles with split girdles can go higher, and a stone whose
-// planes get truncated leaks light and renders pale, so keep headroom and say so when it still does not fit.
-const MAX_PLANES = 384;
+// A 16-sector stone has ~180 facet planes; rectangles with split girdles go to ~580. The planes live in a
+// fragment uniform array and the trace loops over them, so the shader is compiled per stone with exactly the
+// count that stone needs: a fixed 384 made phones compile (and sometimes unroll) a loop twice the size they
+// ever use, and phones have a quarter of the desktop uniform budget. A stone whose planes get truncated leaks
+// light and renders pale, so say so when the budget still does not fit.
+const DEFAULT_BUDGET = 384;
 
 // Unique outward facet planes (normal, distance) of a convex mesh, in the mesh's local space.
 export function facetPlanes(geometry) {
@@ -50,8 +53,8 @@ const vertexShader = /* glsl */ `
   }
 `;
 
-const fragmentShader = /* glsl */ `
-  #define MAX_PLANES ${MAX_PLANES}
+const fragmentShaderFor = (n) => /* glsl */ `
+  #define MAX_PLANES ${n}
   uniform vec4 uPlanes[MAX_PLANES];
   uniform int uCount;
   uniform float uIor;
@@ -145,24 +148,40 @@ const fragmentShader = /* glsl */ `
   }
 `;
 
-export function stoneMaterial(geometry, { black = false } = {}) {
+// A stone the phone can always draw: faceted crystal lit by the same environment. Used when the traced
+// shader will not fit the device, and swapped in by app.js if the driver refuses to compile it anyway.
+export function simpleStoneMaterial({ black = false } = {}) {
+  // Fully reflective facets read as a cut stone; a dielectric with no transmission just looks like white resin.
+  return new THREE.MeshPhysicalMaterial({
+    name: black ? "CZ_Black_simple" : "CZ_simple",
+    color: black ? 0x23232a : 0xf2f4ff,
+    metalness: 1, roughness: black ? 0.1 : 0.02,
+    envMapIntensity: black ? 1.2 : 3.0, flatShading: true
+  });
+}
+
+export function stoneMaterial(geometry, { black = false, budget = DEFAULT_BUDGET, bounces } = {}) {
   const all = facetPlanes(geometry);
-  if (all.length > MAX_PLANES) console.warn(`gem: stone has ${all.length} facet planes, only ${MAX_PLANES} traced`);
-  const planes = all.slice(0, MAX_PLANES);
-  const packed = Array.from({ length: MAX_PLANES }, (_, i) =>
+  const cap = Math.max(16, Math.min(budget, DEFAULT_BUDGET * 2));
+  if (all.length > cap) console.warn(`gem: stone has ${all.length} facet planes, only ${cap} traced`);
+  const planes = all.slice(0, cap);
+  const n = Math.max(1, planes.length);
+  const packed = Array.from({ length: n }, (_, i) =>
     planes[i] ? new THREE.Vector4(planes[i].n.x, planes[i].n.y, planes[i].n.z, planes[i].d) : new THREE.Vector4());
-  return new THREE.ShaderMaterial({
+  const mat = new THREE.ShaderMaterial({
     name: black ? "CZ_Black_traced" : "CZ_traced",
     uniforms: {
       uPlanes: { value: packed },
-      uCount: { value: planes.length },
+      uCount: { value: n },
       uIor: { value: 2.16 },
       uDispersion: { value: black ? 0 : 0.015 },
-      uBounces: { value: black ? 0 : 7 },
+      uBounces: { value: black ? 0 : (bounces ?? 7) },
       uBody: { value: black ? 0.0 : 1.0 },
       uTint: { value: new THREE.Color(black ? 0x000000 : 0xffffff) },
       uExposure: { value: black ? 0.9 : 1.0 }
     },
-    vertexShader, fragmentShader
+    vertexShader, fragmentShader: fragmentShaderFor(n)
   });
+  mat.userData.gem = { black, planes: all.length, traced: n, truncated: all.length > cap };
+  return mat;
 }
