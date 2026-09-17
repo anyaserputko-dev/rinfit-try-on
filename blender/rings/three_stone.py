@@ -4,6 +4,13 @@ Product page (rinfit.com/products/three-stones-round-cut-silicone-ring):
   Band Width 6 mm | Band Thickness 2 mm | three Round-Cut CZ | polished brass setting
   Colours: "Nude and Rose Gold", "White and Silver", "Black and Silver"
 
+Every number below is FITTED to Rinfit's own CAD render, not guessed: blender/fit/fit_three_stone.py builds
+the ring with flat per-material colours, renders it small and maximises IoU against masks taken from the black
+variant photo (5_fefdd110 - there silicone / setting separate by brightness), then walks the 13 parameters by
+coordinate descent. Final IoU: silhouette 0.955, setting 0.842, band 0.744.
+The fit recovered the two numbers the product page does state - band thickness 2.1 mm (page: 2 mm) and an inner
+diameter of 17.1 mm (US 7: 17.32) - which is why its verdict on the stones is trusted.
+
 Stone sizes are NOT stated. Measured off the CAD hero (7_9ac6a3ab..., the picture Anna gave as the reference)
 and the white variant (6_5d50accd...), which show the same geometry from the same camera:
   centre : side stone = 1.47 (the DVS_* hand photos give the same ratio)
@@ -25,20 +32,20 @@ from mathutils import Matrix, Vector
 
 COLORS = ["Nude and Rose Gold", "White and Silver", "Black and Silver"]
 
-BAND = dict(width=6.0, thickness=2.0, dome=0.85, inner_dome=0.12, edge_out=1.0, edge_in=0.4)
+BAND = dict(width=6.0, thickness=2.0, dome=1.06, inner_dome=0.12, edge_out=0.56, edge_in=0.4)
 
-CENTER = 6.95                   # centre stone diameter (mm)
-SIDE = 4.70                     # side stone diameter
-GAP = 0.15                      # between neighbouring girdles
-GIRDLE_H = 2.30                 # girdle plane over the crown of the band
-RAIL = dict(h=0.85, half_w=1.60, over=0.70, taper=9.0)   # height over the band, half width, run past the
+CENTER = 8.23                   # centre stone diameter (mm)
+SIDE = 4.74                     # side stone diameter
+GAP = 0.05                      # between neighbouring girdles
+GIRDLE_H = 2.83                 # girdle plane over the crown of the band
+RAIL = dict(h=0.85, half_w=1.43, over=0.70, taper=9.0)   # height over the band, half width, run past the
 #                                                          outer stone edge, degrees of end taper
 STONE = dict(table=0.56, star=0.78, crown=0.15, pavilion=0.435, lower=0.23, sectors=8, pav_sectors=8)
 CLAW = dict(radius=0.30, tip=(0.46, 0.46, 0.62), lean=0.26, tip_height=0.62, back=0.50)
 TEXT = dict(size=2.2, depth=0.15, spacing=1.15, rotate=0.0)
-TEXT_PHI = math.radians(62.0)   # RINFIT starts just past the end of the rail, centred on the band width
+TEXT_PHI = math.radians(72.0)   # RINFIT starts just past the end of the rail, centred on the band width
 
-HERO = dict(direction=(0.0, -0.3420, 0.9397), up=(0.1736, 0.0, 0.9848), target=(0, 0, 2.5), dist=60, lens=85)
+HERO = dict(direction=(0.0, -0.3328, 0.9430), up=(0.1413, 0.0, 0.9900), target=(0, 0, 2.5), dist=51.2, lens=85)
 VIEWS = {
     "hero": dict(camera=HERO, frame=False, color="Nude and Rose Gold"),
     "white": dict(camera=HERO, frame=False, color="White and Silver"),

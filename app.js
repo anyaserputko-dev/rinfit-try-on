@@ -23,7 +23,7 @@ const state = {
   ring: RINGS.find((r) => r.id === params.get("ring")) || RINGS[4],
   color: null, finger: params.get("finger") || "ring", mode: "3d", facing: "user",
   stream: null, landmarker: null, lmMode: null, hand: null, lastSeen: 0, lastVideoTime: -1, lastDetect: 0,
-  w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }
+  w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }, capturing: false
 };
 state.color = state.ring.colors.includes(params.get("color")) ? params.get("color") : state.ring.colors[0];
 // Hand tracking only estimates how wide a finger is; on a hand held close or at an angle it can be off,
@@ -704,14 +704,56 @@ async function loadPhoto(src) {
   setHint(found ? "Drag the ring · pinch to resize" : "No hand found — try a photo with the back of the hand");
 }
 
-for (const id of ["file", "file-cam"]) {
-  $(id).onchange = (e) => {
-    const f = e.target.files?.[0];
-    if (f) loadPhoto(URL.createObjectURL(f));
-  };
-}
-$("intro-camera").onclick = () => $("file-cam").click();
+$("file").onchange = (e) => {
+  const f = e.target.files?.[0];
+  if (f) loadPhoto(URL.createObjectURL(f));
+};
 $("intro-gallery").onclick = () => $("file").click();
+
+/* ---------- taking the photo here, not in a file dialog ----------
+   A file input with capture="environment" only opens the camera on a phone; on a laptop it is just a file
+   picker, which is why "Take a photo" looked like it went to the gallery. So the camera opens in the page:
+   the shopper sees their hand, presses the button, and that frame goes straight into the try-on. */
+$("intro-camera").onclick = async () => {
+  $("photo-intro").hidden = true;
+  photo.hidden = true;
+  state.capturing = true;
+  video.hidden = false;
+  $("shot").hidden = false;
+  $("flip").hidden = false;
+  setHint("Hold your hand as shown, then press the button");
+  stopCamera();
+  try {
+    state.stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: state.facing, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false
+    });
+  } catch {
+    state.capturing = false;
+    video.hidden = true;
+    $("photo-intro").hidden = false;
+    setHint("Camera blocked — choose a photo from the gallery");
+    return;
+  }
+  video.srcObject = state.stream;
+  await video.play().catch(() => {});
+  stage.classList.toggle("mirror", state.facing === "user");
+};
+
+function grabFrame() {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w) return;
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const g = c.getContext("2d");
+  if (state.facing === "user") { g.translate(w, 0); g.scale(-1, 1); }   // keep the picture she was looking at
+  g.drawImage(video, 0, 0, w, h);
+  state.capturing = false;
+  stopCamera();
+  video.hidden = true;
+  stage.classList.remove("mirror");
+  loadPhoto(c.toDataURL("image/jpeg", 0.92));
+}
 
 async function setMode(mode) {
   state.mode = mode;
@@ -724,6 +766,7 @@ async function setMode(mode) {
   $("shot").hidden = !ar;
   $("shot-card").hidden = true;
   $("photo-intro").hidden = true;
+  state.capturing = false;
   controls.enabled = mode === "3d";   // in try-on a drag moves the ring, it does not orbit the camera
   resetAdjust();
   $("fit").hidden = !ar;
@@ -745,7 +788,11 @@ async function setMode(mode) {
 $("mode-3d").onclick = () => setMode("3d");
 $("mode-live").onclick = () => setMode("live");
 $("mode-photo").onclick = () => setMode("photo");
-$("flip").onclick = () => { state.facing = state.facing === "user" ? "environment" : "user"; startCamera(); };
+$("flip").onclick = () => {
+  state.facing = state.facing === "user" ? "environment" : "user";
+  if (state.capturing) $("intro-camera").onclick();   // still framing the hand: restart that camera
+  else startCamera();
+};
 
 /* ---------- snapshot and saved rings ---------- */
 let favs = new Set();
@@ -810,6 +857,7 @@ function brand(g, w, h) {
 }
 
 $("shot").onclick = () => {
+  if (state.capturing) return grabFrame();   // still taking the picture of the hand
   const out = document.createElement("canvas");
   out.width = canvas.width; out.height = canvas.height;
   const g = out.getContext("2d");

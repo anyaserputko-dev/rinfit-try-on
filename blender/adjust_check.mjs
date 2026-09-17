@@ -52,4 +52,25 @@ const intro = await page2.evaluate(() => {
   };
 });
 console.log(`photo intro shown: ${intro.shown}  "${intro.title}"  buttons: ${intro.buttons.join(" / ")}`);
+
+// "Take a photo" must open the camera in the page, not a file dialog. Headless has no camera, so the right
+// behaviour here is the graceful refusal: back to the card with an explanation, and no crash.
+const errs = [];
+page2.on("pageerror", (e) => errs.push(String(e).slice(0, 200)));
+const camera = await page2.evaluate(async () => {
+  const opened = [];
+  const input = document.getElementById("file");
+  input.addEventListener("click", () => opened.push("file dialog"));
+  await document.getElementById("intro-camera").onclick();
+  return {
+    openedFileDialog: opened.length > 0,
+    capturing: window.__tryon ? undefined : undefined,
+    introBack: !document.getElementById("photo-intro").hidden,
+    hint: document.getElementById("hint").textContent,
+    videoShown: !document.getElementById("video").hidden
+  };
+});
+console.log(`take-a-photo: file dialog opened? ${camera.openedFileDialog}  ` +
+            `fallback card: ${camera.introBack}  hint: "${camera.hint}"  video: ${camera.videoShown}`);
+if (errs.length) console.log("page errors:", errs.join(" || "));
 await browser.close();
