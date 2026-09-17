@@ -507,6 +507,7 @@ function placeRing(srcW, srcH) {
   if (!hand || !srcW || !window.__tryon.built) {
     arMain.visible = arSecond.visible = false;
     arMain.userData.pose = arSecond.userData.pose = null;   // next hand starts in place, not flying in
+    state.isRight = undefined; state.handVotes = 0;        // and decides which hand it is from scratch
     return;
   }
   const P = mapper(srcW, srcH);
@@ -522,17 +523,32 @@ function placeRing(srcW, srcH) {
   for (const [k, w] of [[2, 1], [3, 1], [4, 1], [8, 0.4], [12, 0.4], [16, 0.4], [20, 0.4]]) {
     vote += w * new THREE.Vector3().subVectors(pts[k], pts[0]).dot(raw);
   }
-  // Keep the previous answer until the evidence is clearly the other way: near the flip point this vote
-  // flickers from frame to frame and the ring used to spin 180 degrees on the finger.
   const v = vote / spacing;
-  if (state.palmSign === undefined) state.palmSign = (Math.abs(v) < 0.05 ? hand.handed === "Right" : v > 0) ? 1 : -1;
-  if (v > 0.12) state.palmSign = 1;
-  else if (v < -0.12) state.palmSign = -1;
-  const palm = state.palmSign > 0 ? raw.clone().negate() : raw.clone();
+  // Which side of the finger the stone sits on is one question only: WHICH HAND this is. The cross product
+  // above is the chirality of the hand's own landmarks, so for a given hand it always points out of the same
+  // face, whatever the pose — and its z then says by itself whether we are looking at the back or the palm.
+  // Two independent readings of the hand, because each fails where the other works:
+  //   - MediaPipe's label, which it defines for a MIRRORED frame. Every frame we hand it is raw — getUserMedia
+  //     gives the sensor image and only the preview is flipped by CSS — so the label always means the other
+  //     hand here and is swapped once, for the camera and for photos alike.
+  //   - the anatomy vote, which is decisive on a curled hand and ~0 on a flat open one (measured 0.01).
+  let isRight = hand.handed === "Left";
+  if (Math.abs(v) > 0.8) isRight = v < 0;
+  // Hysteresis belongs on the hand, not on the facing: a hand does not change between frames, while turning
+  // it over must turn the ring over at once. The old code held the facing instead, and since a flat open hand
+  // gives no anatomy vote, it froze on its first guess and never noticed the hand being turned.
+  if (state.isRight === undefined) state.isRight = isRight;
+  else if (isRight !== state.isRight) {
+    state.handVotes = state.handLast === isRight ? (state.handVotes || 0) + 1 : 1;
+    state.handLast = isRight;
+    if (state.handVotes >= 3) { state.isRight = isRight; state.handVotes = 0; }
+  } else state.handVotes = 0;
+  // The stone always rides on the back of the finger, so this is where it points.
+  const palm = state.isRight ? raw.clone() : raw.clone().negate();
   // A finger pointing at the camera or curled up gives a segment barely a few pixels long: its direction is
   // noise, so hold the last good pose instead of throwing the ring around.
   const reliable = (f) => pts[FINGERS[f][0]].distanceTo(pts[FINGERS[f][1]]) > spacing * 0.45;
-  const debug = { handed: hand.handed, vote: +v.toFixed(2), sign: state.palmSign };
+  const debug = { handed: hand.handed, isRight: state.isRight, vote: +v.toFixed(2), nz: +palm.z.toFixed(2) };
   if (reliable(state.finger)) debug.main = placeOn(arMain, state.finger, pts, spacing, palm, dt);
   else debug.main = arMain.userData.pose ? "held" : (arMain.visible = false);
   window.__tryon.landmarks = pts.map((p) => [+p.x.toFixed(1), +(-p.y).toFixed(1)]);   // stage pixels, y down
@@ -696,7 +712,8 @@ function diagnostics() {
     gpu: gl.getParameter(gl.getExtension("WEBGL_debug_renderer_info")?.UNMASKED_RENDERER_WEBGL || gl.RENDERER),
     webgl2: c.isWebGL2, fragUniformVectors: c.maxFragmentUniforms, budget: GEM_BUDGET, bounces: GEM_BOUNCES,
     ring: state.ring.id, stone: stone || (gemBroken ? "simple (shader failed)" : "simple"),
-    shaderError: gemBroken || null, pixelRatio: renderer.getPixelRatio(), camera: window.__tryon.camera || null
+    shaderError: gemBroken || null, pixelRatio: renderer.getPixelRatio(), camera: window.__tryon.camera || null,
+    mode: state.mode, cameraFacing: state.facing, hand: window.__tryon.debug || null
   };
 }
 window.__tryon.diagnostics = diagnostics;
