@@ -625,8 +625,13 @@ function placeRing(srcW, srcH) {
     state.handLast = isRight;
     if (state.handVotes >= 3) { state.isRight = isRight; state.handVotes = 0; }
   } else state.handVotes = 0;
-  // The stone always rides on the back of the finger, so this is where it points.
-  const palm = state.isRight ? raw.clone() : raw.clone().negate();
+  // The stone always rides on the back of the finger, so this is where it points. The vector has to live in
+  // the same space as the ring's axis — the picture — otherwise the two disagree and the ring rolls round the
+  // finger until the stone slides off its middle. Which face of the hand this is was already settled above
+  // from the metric landmarks, which is what they are good for.
+  const rawSeen = new THREE.Vector3().subVectors(pts[5], pts[0])
+    .cross(new THREE.Vector3().subVectors(pts[17], pts[0])).normalize();
+  const palm = state.isRight ? rawSeen : rawSeen.negate();
   // A finger pointing at the camera or curled up gives a segment barely a few pixels long: its direction is
   // noise, so hold the last good pose instead of throwing the ring around.
   // A finger folded into a fist has no place to wear a ring that the camera can see: its knuckle segment
