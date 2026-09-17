@@ -51,6 +51,17 @@ button:focus-visible,a:focus-visible,label:focus-within{outline:2px solid var(--
 .fit{position:absolute;z-index:5;right:12px;bottom:66px;display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.88);backdrop-filter:blur(8px);border-radius:999px;padding:4px;box-shadow:0 1px 8px rgba(0,0,0,.08)}
 .fit button{border:0;background:transparent;border-radius:50%;width:30px;height:30px;font-size:17px;font-weight:600;line-height:1;display:grid;place-items:center}
 .fit b{font-size:12px;font-weight:600;min-width:42px;text-align:center;color:var(--ink-2)}
+/* the photo a shopper keeps: their hand, the ring, and whose ring it is */
+.shot-card{position:absolute;z-index:7;inset:0;background:rgba(17,17,17,.82);backdrop-filter:blur(6px);display:grid;grid-template-rows:minmax(0,1fr) auto;gap:10px;padding:12px}
+.shot-card img{width:100%;height:100%;object-fit:contain;border-radius:6px;min-height:0}
+.shot-actions{display:flex;justify-content:center;gap:10px}
+.shot-actions button{width:46px;height:46px;border-radius:50%;border:0;background:rgba(255,255,255,.94);display:grid;place-items:center;color:var(--ink);box-shadow:0 1px 8px rgba(0,0,0,.18)}
+.shot-actions svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.like{border:0;background:transparent;padding:4px;display:grid;place-items:center;color:var(--ink-3)}
+.like svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8}
+.like[aria-pressed="true"]{color:#e0464b}
+.like[aria-pressed="true"] svg{fill:currentColor}
+.price-row{display:flex;align-items:center;gap:8px}
 .round{width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.92);display:grid;place-items:center;box-shadow:0 1px 8px rgba(0,0,0,.1);flex:none}
 .round svg{width:20px;height:20px}
 .loader{position:absolute;z-index:6;inset:0;display:grid;place-items:center;background:rgba(233,228,225,.72);font-size:14px;font-weight:600}
@@ -135,6 +146,23 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg>
       </button>
     </div>
+    <div class="shot-card" id="shot-card" hidden>
+      <img id="shot-img" alt="Your try-on photo">
+      <div class="shot-actions">
+        <button id="shot-like" class="like" aria-pressed="false" title="Save this ring" aria-label="Save this ring">
+          <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-9.1A4 4 0 0 1 12 7.2 4 4 0 0 1 19 10.9C19 15.6 12 20 12 20z"/></svg>
+        </button>
+        <button id="shot-share" title="Share" aria-label="Share">
+          <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M5 14v5h14v-5"/></svg>
+        </button>
+        <button id="shot-save" title="Save photo" aria-label="Save photo">
+          <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0 4-4m-4 4-4-4"/><path d="M5 19h14"/></svg>
+        </button>
+        <button id="shot-close" title="Back to try-on" aria-label="Back to try-on">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+    </div>
     <div class="loader" id="loader" hidden>Loading hand tracking…</div>
     <input type="file" id="file" accept="image/*" hidden>
   </section>
@@ -144,7 +172,10 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
       <p class="eyebrow" id="p-family">GlowStone</p>
       <h1 class="title" id="p-name">Ring</h1>
       <div class="row">
-        <span class="price" id="p-price">$0.00</span>
+        <span class="price-row"><span class="price" id="p-price">$0.00</span>
+          <button id="p-like" class="like" aria-pressed="false" title="Save this ring" aria-label="Save this ring">
+            <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-9.1A4 4 0 0 1 12 7.2 4 4 0 0 1 19 10.9C19 15.6 12 20 12 20z"/></svg>
+          </button></span>
         <a class="link" id="p-link" href="https://www.rinfit.com/" target="_blank" rel="noopener">View on rinfit.com ↗</a>
       </div>
       <p class="set-note" id="p-set" hidden></p>
@@ -152,6 +183,10 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
     <div>
       <p class="label">Color: <span id="p-color">—</span></p>
       <div class="swatches" id="swatches" role="group" aria-label="Color"></div>
+    </div>
+    <div id="fav-wrap" hidden>
+      <p class="label">Saved <span id="fav-count"></span></p>
+      <div class="grid" id="favs"></div>
     </div>
     <div>
       <p class="label">Choose a ring</p>

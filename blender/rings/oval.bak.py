@@ -46,8 +46,8 @@ def build(L, color, scene="hero"):
         g = Vector((x, y, girdle_z))
         base = Vector((x * 0.55, y * 0.25, r_top - 0.3))
         # img_00: claw tip is a rounded drop ~0.9 mm wide and ~1.5 mm long lying over the crown edge
-        parts += L.prong(f"prong{j}", base, g, (0, 0), crown_h, metal, radius=0.30, tip=(1.05, 0.40, 0.50),
-                         lean=0.30, tip_height=0.62)
+        parts += L.prong(f"prong{j}", base, g, (0, 0), crown_h, metal, radius=0.45, tip=(0.62, 0.55, 0.85),
+                         lean=0.35, tip_height=0.35)
     # no gallery rail under the girdle (img_00 / img_10 show none through the stone); a small seat on the band
     parts.append(L.rail("seat", outline, r_top + 0.2, 0.3, scale=0.36, mat=metal))
     setting = L.join(parts, "metal", metal, smooth=True)

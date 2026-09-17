@@ -421,19 +421,28 @@ function pickHand(result) {
     const area = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
     if (area > bestArea) { bestArea = area; best = i; }
   });
-  return { lms: result.landmarks[best], handed: result.handedness[best][0].categoryName };
+  return {
+    lms: result.landmarks[best],
+    // Metric 3D landmarks, origin at the hand's own centre, axes aligned with the camera. The flat picture
+    // loses a finger's direction the moment it points at the lens; these keep it.
+    world: result.worldLandmarks?.[best] || null,
+    handed: result.handedness[best][0].categoryName,
+  };
 }
 
 function onResult(result, live) {
   const hand = pickHand(result);
   if (!hand) return false;
   if (live && state.hand && state.hand.handed === hand.handed && performance.now() - state.lastSeen < 300) {
-    state.hand.lms = state.hand.lms.map((p, i) => {
-      const q = hand.lms[i];
+    const blend = (prev, next) => prev.map((p, i) => {
+      const q = next[i];
       return { x: p.x + (q.x - p.x) * SMOOTH, y: p.y + (q.y - p.y) * SMOOTH, z: p.z + (q.z - p.z) * SMOOTH };
     });
+    state.hand.lms = blend(state.hand.lms, hand.lms);
+    if (state.hand.world && hand.world) state.hand.world = blend(state.hand.world, hand.world);
   } else {
-    state.hand = { lms: hand.lms.map((p) => ({ x: p.x, y: p.y, z: p.z })), handed: hand.handed };
+    const copy = (l) => l.map((p) => ({ x: p.x, y: p.y, z: p.z }));
+    state.hand = { lms: copy(hand.lms), world: hand.world ? copy(hand.world) : null, handed: hand.handed };
   }
   state.lastSeen = performance.now();
   return true;
@@ -459,12 +468,18 @@ function mapper(srcW, srcH) {
        40 px on the same hand. Drawing the found edges over the photo showed them off the finger entirely.
    Anything new here has to be checked the same way — overlay the edges it finds on a real photo first. */
 
-function placeOn(holder, finger, pts, spacing, palm, dt) {
+function placeOn(holder, finger, pts, W, m, palm, dt) {
   const [ia, ib, widthK] = FINGERS[finger];
   const A = pts[ia].clone(), B = pts[ib].clone();
-  const axis = new THREE.Vector3().subVectors(B, A).normalize();
-  // Each measure shrinks when the hand turns away from the camera, so take the largest.
-  const fingerWidth = Math.max(spacing * 0.86, pts[0].distanceTo(pts[9]) * 0.185, A.distanceTo(B) * 0.42) * widthK * state.fit;
+  // Direction along the finger is read in 3D. On the picture this segment collapses to a few pixels whenever
+  // the finger points at the lens or curls up — and a direction taken from those pixels is noise, which is
+  // exactly when the ring used to spin. In metric space the segment keeps its length whatever the pose.
+  const axis = W[ib].clone().sub(W[ia]).normalize();
+  // Size stays on the picture. The metric landmarks are normalised to an average hand, not to this shopper's,
+  // so sizing from them came out ~1.7x too wide; these three measures are calibrated against real photos and
+  // each only shrinks when the hand turns away, hence the largest.
+  const fingerWidth = Math.max(m.spacing2 * 0.86, pts[0].distanceTo(pts[9]) * 0.185, A.distanceTo(B) * 0.42)
+                      * widthK * state.fit;
   const scale = fingerWidth / (INNER_RADIUS * 2);
   const zAxis = palm.clone().sub(axis.clone().multiplyScalar(palm.dot(axis))).normalize();
   const xAxis = new THREE.Vector3().crossVectors(axis, zAxis).normalize();
@@ -512,18 +527,22 @@ function placeRing(srcW, srcH) {
   }
   const P = mapper(srcW, srcH);
   const pts = hand.lms.map((p) => P(p));
+  // Same axes as the stage: x right, y up, z towards the viewer.
+  const W = (hand.world || hand.lms).map((p) => new THREE.Vector3(p.x, -p.y, -p.z));
   // test hook: shake the landmarks the way live tracking does, to measure what the smoothing removes
   const shake = +(window.__tryon.jitter || 0);
   if (shake) for (const p of pts) { p.x += (Math.random() - 0.5) * shake; p.y += (Math.random() - 0.5) * shake; }
   const spacing = (pts[5].distanceTo(pts[9]) + pts[9].distanceTo(pts[13]) + pts[13].distanceTo(pts[17])) / 3;
+  const spacing3 = (W[5].distanceTo(W[9]) + W[9].distanceTo(W[13]) + W[13].distanceTo(W[17])) / 3;
+  const measure = { spacing2: spacing, spacing: spacing3 };
   // Normal of the back of the hand. The handedness label is unreliable on photos, so decide by anatomy:
   // the thumb and curled fingertips sit on the palm side of the wrist–knuckle plane.
-  const raw = new THREE.Vector3().subVectors(pts[5], pts[0]).cross(new THREE.Vector3().subVectors(pts[17], pts[0])).normalize();
+  const raw = W[5].clone().sub(W[0]).cross(W[17].clone().sub(W[0])).normalize();
   let vote = 0;
   for (const [k, w] of [[2, 1], [3, 1], [4, 1], [8, 0.4], [12, 0.4], [16, 0.4], [20, 0.4]]) {
-    vote += w * new THREE.Vector3().subVectors(pts[k], pts[0]).dot(raw);
+    vote += w * W[k].clone().sub(W[0]).dot(raw);
   }
-  const v = vote / spacing;
+  const v = vote / Math.max(spacing3, 1e-4);
   // Which side of the finger the stone sits on is one question only: WHICH HAND this is. The cross product
   // above is the chirality of the hand's own landmarks, so for a given hand it always points out of the same
   // face, whatever the pose — and its z then says by itself whether we are looking at the back or the palm.
@@ -532,8 +551,10 @@ function placeRing(srcW, srcH) {
   //     gives the sensor image and only the preview is flipped by CSS — so the label always means the other
   //     hand here and is swapped once, for the camera and for photos alike.
   //   - the anatomy vote, which is decisive on a curled hand and ~0 on a flat open one (measured 0.01).
+  // Taken in 3D the vote is decisive on an open hand too — the thumb really does sit off the knuckle plane,
+  // it only looked flat once the picture flattened it. That is what used to freeze the answer on frame one.
   let isRight = hand.handed === "Left";
-  if (Math.abs(v) > 0.8) isRight = v < 0;
+  if (Math.abs(v) > 0.25) isRight = v < 0;
   // Hysteresis belongs on the hand, not on the facing: a hand does not change between frames, while turning
   // it over must turn the ring over at once. The old code held the facing instead, and since a flat open hand
   // gives no anatomy vote, it froze on its first guess and never noticed the hand being turned.
@@ -547,13 +568,34 @@ function placeRing(srcW, srcH) {
   const palm = state.isRight ? raw.clone() : raw.clone().negate();
   // A finger pointing at the camera or curled up gives a segment barely a few pixels long: its direction is
   // noise, so hold the last good pose instead of throwing the ring around.
-  const reliable = (f) => pts[FINGERS[f][0]].distanceTo(pts[FINGERS[f][1]]) > spacing * 0.45;
-  const debug = { handed: hand.handed, isRight: state.isRight, vote: +v.toFixed(2), nz: +palm.z.toFixed(2) };
-  if (reliable(state.finger)) debug.main = placeOn(arMain, state.finger, pts, spacing, palm, dt);
-  else debug.main = arMain.userData.pose ? "held" : (arMain.visible = false);
+  // A finger folded into a fist has no place to wear a ring that the camera can see: its knuckle segment
+  // points away, so any ring drawn there floats beside the hand instead of sitting on skin. Both checks are
+  // made in 3D, where a folded finger reads as folded no matter which way the hand is turned.
+  const straight = (f) => {
+    const [a, b] = FINGERS[f];
+    const proximal = W[b].clone().sub(W[a]);
+    const middle = W[b + 1].clone().sub(W[b]);
+    if (proximal.length() < 1e-4 || middle.length() < 1e-4) return false;
+    return proximal.normalize().dot(middle.normalize()) > 0.45;      // < ~63 degrees between the phalanges
+  };
+  const reliable = (f) => W[FINGERS[f][0]].distanceTo(W[FINGERS[f][1]]) > spacing3 * 0.45 && straight(f);
+  const debug = { handed: hand.handed, isRight: state.isRight, vote: +v.toFixed(2), nz: +palm.z.toFixed(2), world: !!hand.world };
+  if (reliable(state.finger)) {
+    debug.main = placeOn(arMain, state.finger, pts, W, measure, palm, dt);
+    state.badFinger = 0;
+  } else {
+    // Hold the last pose for a blink — a single bad frame should not make the ring flicker — then take it off
+    // and say why, instead of leaving it hanging in mid-air next to a fist.
+    state.badFinger = (state.badFinger || 0) + dt;
+    const hold = state.badFinger < 0.4 && arMain.userData.pose;
+    arMain.visible = !!hold;
+    arSecond.visible = arSecond.visible && !!hold;
+    debug.main = hold ? "held" : "finger-folded";
+    if (!hold && state.mode === "live") setHint(straight(state.finger) ? "Show the back of your hand" : "Straighten the finger you are trying on");
+  }
   window.__tryon.landmarks = pts.map((p) => [+p.x.toFixed(1), +(-p.y).toFixed(1)]);   // stage pixels, y down
   if (state.hasSecond && reliable(NEIGHBOR[state.finger])) {
-    debug.second = placeOn(arSecond, NEIGHBOR[state.finger], pts, spacing, palm, dt);
+    debug.second = placeOn(arSecond, NEIGHBOR[state.finger], pts, W, measure, palm, dt);
   } else if (!state.hasSecond) {
     arSecond.visible = false;
   }
