@@ -721,7 +721,8 @@ $("intro-camera").onclick = async () => {
   video.hidden = false;
   $("shot").hidden = false;
   $("flip").hidden = false;
-  setHint("Hold your hand as shown, then press the button");
+  setHint("Hold your hand as shown, then press the big round button");
+  stage.classList.add("capturing");
   stopCamera();
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
@@ -730,6 +731,7 @@ $("intro-camera").onclick = async () => {
   } catch {
     state.capturing = false;
     video.hidden = true;
+    stage.classList.remove("capturing");
     $("photo-intro").hidden = false;
     setHint("Camera blocked — choose a photo from the gallery");
     return;
@@ -751,7 +753,7 @@ function grabFrame() {
   state.capturing = false;
   stopCamera();
   video.hidden = true;
-  stage.classList.remove("mirror");
+  stage.classList.remove("mirror", "capturing");
   loadPhoto(c.toDataURL("image/jpeg", 0.92));
 }
 
@@ -767,6 +769,7 @@ async function setMode(mode) {
   $("shot-card").hidden = true;
   $("photo-intro").hidden = true;
   state.capturing = false;
+  stage.classList.remove("capturing");
   controls.enabled = mode === "3d";   // in try-on a drag moves the ring, it does not orbit the camera
   resetAdjust();
   $("fit").hidden = !ar;

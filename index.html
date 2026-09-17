@@ -73,6 +73,12 @@ button:focus-visible,a:focus-visible,label:focus-within{outline:2px solid var(--
 .intro-buttons button.primary{background:var(--black);color:#fff;border-color:var(--black)}
 .round{width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.92);display:grid;place-items:center;box-shadow:0 1px 8px rgba(0,0,0,.1);flex:none}
 .round svg{width:20px;height:20px}
+/* while the hand is being photographed the shutter is the only thing that matters: big, centred, obvious */
+.stage.capturing .fingers{display:none}
+.stage.capturing .bar{justify-content:center;gap:18px}
+.stage.capturing .shutter{width:66px;height:66px}
+.stage.capturing .shutter svg{width:40px;height:40px}
+.stage.capturing #flip{position:absolute;right:0;bottom:10px}
 .loader{position:absolute;z-index:6;inset:0;display:grid;place-items:center;background:rgba(233,228,225,.72);font-size:14px;font-weight:600}
 .loader[hidden]{display:none}
 
@@ -149,10 +155,10 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
         <button data-f="pinky" aria-pressed="false">Pinky</button>
       </div>
       <button class="round" id="flip" title="Switch camera" aria-label="Switch camera" hidden>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><path d="M9 13a3 3 0 0 0 5.6 1.5M15 12a3 3 0 0 0-5.6-1.5"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11a8 8 0 0 0-13.7-5.2L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 5.2L20 16"/><path d="M20 20v-4h-4"/></svg>
       </button>
-      <button class="round" id="shot" title="Save snapshot" aria-label="Save snapshot" hidden>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg>
+      <button class="round shutter" id="shot" title="Take the photo" aria-label="Take the photo" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9.2"/><circle cx="12" cy="12" r="6.4" fill="currentColor" stroke="none"/></svg>
       </button>
     </div>
     <div class="intro" id="photo-intro" hidden>
