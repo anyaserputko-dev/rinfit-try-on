@@ -337,6 +337,7 @@ function renderPanel() {
   }));
 
   for (const card of $("grid").children) card.setAttribute("aria-pressed", String(card.dataset.id === r.id));
+  syncLike();
 }
 
 function buildGrid() {
@@ -663,6 +664,7 @@ async function setMode(mode) {
   video.hidden = mode !== "live";
   $("flip").hidden = mode !== "live";
   $("shot").hidden = !ar;
+  $("shot-card").hidden = true;
   $("fit").hidden = !ar;
   if (mode !== "live") stopCamera();
   if (mode !== "photo") photo.hidden = true;
@@ -682,15 +684,77 @@ $("mode-live").onclick = () => setMode("live");
 $("mode-photo").onclick = () => setMode("photo");
 $("flip").onclick = () => { state.facing = state.facing === "user" ? "environment" : "user"; startCamera(); };
 
+/* ---------- snapshot and saved rings ---------- */
+let favs = new Set();
+try { favs = new Set(JSON.parse(localStorage.getItem("rinfit-favs") || "[]")); } catch { /* private mode */ }
+let shotUrl = null;
+
+function syncLike() {
+  const on = favs.has(state.ring.id);
+  for (const id of ["p-like", "shot-like"]) $(id).setAttribute("aria-pressed", String(on));
+}
+
+function renderFavs() {
+  const list = RINGS.filter((r) => favs.has(r.id));
+  $("fav-wrap").hidden = !list.length;
+  $("fav-count").textContent = list.length ? `· ${list.length}` : "";
+  $("favs").replaceChildren(...list.map((r) => {
+    const b = document.createElement("button");
+    b.className = "card";
+    b.innerHTML = `<img alt="" loading="lazy"><b></b><span></span>`;
+    b.querySelector("img").src = r.img;
+    b.querySelector("b").textContent = r.name;
+    b.querySelector("span").textContent = `$${r.price.toFixed(2)}`;
+    b.onclick = () => { state.ring = r; state.color = r.colors[0]; rebuild(); };
+    return b;
+  }));
+}
+
+function toggleFav() {
+  const id = state.ring.id;
+  if (favs.has(id)) favs.delete(id);
+  else favs.add(id);
+  try { localStorage.setItem("rinfit-favs", JSON.stringify([...favs])); } catch { /* private mode */ }
+  syncLike();
+  renderFavs();
+}
+$("p-like").onclick = toggleFav;
+$("shot-like").onclick = toggleFav;
+
+// A shopper keeps this photo or sends it to a friend, so it has to say whose ring it is.
+function brand(g, w, h) {
+  const pad = Math.round(w * 0.045);
+  const strip = Math.round(h * 0.17);
+  const grad = g.createLinearGradient(0, h - strip, 0, h);
+  grad.addColorStop(0, "rgba(17,17,17,0)");
+  grad.addColorStop(1, "rgba(17,17,17,.55)");
+  g.fillStyle = grad;
+  g.fillRect(0, h - strip, w, strip);
+  const big = Math.round(w * 0.042), small = Math.round(w * 0.028);
+  g.fillStyle = "#ffffff";
+  g.textBaseline = "alphabetic";
+  g.font = `700 ${big}px "Kumbh Sans", system-ui, sans-serif`;
+  try { g.letterSpacing = `${Math.round(big * 0.18)}px`; } catch { /* older browsers */ }
+  g.fillText("RINFIT", pad, h - pad - Math.round(small * 1.9));
+  try { g.letterSpacing = "0px"; } catch { /* older browsers */ }
+  g.font = `500 ${small}px "Kumbh Sans", system-ui, sans-serif`;
+  g.globalAlpha = 0.92;
+  g.fillText(`${state.ring.name} · ${state.color}`, pad, h - pad);
+  g.textAlign = "right";
+  g.fillText(`$${state.ring.price.toFixed(2)} · rinfit.com`, w - pad, h - pad);
+  g.textAlign = "left";
+  g.globalAlpha = 1;
+}
+
 $("shot").onclick = () => {
   const out = document.createElement("canvas");
   out.width = canvas.width; out.height = canvas.height;
   const g = out.getContext("2d");
   const src = state.mode === "live" ? video : photo;
   const sw = src.videoWidth || src.naturalWidth, sh = src.videoHeight || src.naturalHeight;
+  g.fillStyle = "#e9e4e1";
+  g.fillRect(0, 0, out.width, out.height);
   if (sw) {
-    g.fillStyle = "#e9e4e1";
-    g.fillRect(0, 0, out.width, out.height);
     const sc = fitMode() === "contain" ? Math.min(out.width / sw, out.height / sh) : Math.max(out.width / sw, out.height / sh);
     g.save();
     if (stage.classList.contains("mirror")) { g.translate(out.width, 0); g.scale(-1, 1); }
@@ -698,10 +762,29 @@ $("shot").onclick = () => {
     g.drawImage(canvas, 0, 0);
     g.restore();
   }
+  brand(g, out.width, out.height);
+  shotUrl = out.toDataURL("image/png");
+  $("shot-img").src = shotUrl;
+  $("shot-card").hidden = false;
+  syncLike();
+};
+$("shot-close").onclick = () => { $("shot-card").hidden = true; };
+$("shot-save").onclick = () => {
   const a = document.createElement("a");
   a.download = `rinfit-${state.ring.id}.png`;
-  a.href = out.toDataURL("image/png");
+  a.href = shotUrl;
   a.click();
+};
+$("shot-share").onclick = async () => {
+  try {
+    const blob = await (await fetch(shotUrl)).blob();
+    const file = new File([blob], `rinfit-${state.ring.id}.png`, { type: "image/png" });
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], text: `${state.ring.name} · Rinfit` });
+      return;
+    }
+  } catch { /* cancelled, or sharing files is not supported */ }
+  $("shot-save").click();
 };
 
 /* ---------- loop ---------- */
@@ -770,6 +853,7 @@ if (params.get("diag") === "1") {
 window.__tryon.step = step;
 
 buildGrid();
+renderFavs();
 setViewCamera(1);
 rebuild().catch((e) => { window.__tryon.error = String(e); setHint("This ring could not be loaded"); });
 setHint("Drag to rotate · pinch to zoom");

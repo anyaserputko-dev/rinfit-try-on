@@ -23,14 +23,21 @@ page.on("console", (m) => { if (m.type() === "error") errors.push(m.text().slice
 await page.setViewport({ width: 1280, height: 1000 });
 await page.goto(BASE + query, { waitUntil: "domcontentloaded", timeout: 60000 });
 
+const start = Date.now();
+const log = (msg) => console.log(`${String((Date.now() - start) / 1000).padStart(6)}s  ${msg}`);
+const withImage = process.argv.includes("--img");   // pulling the finished photo back is the slow part
+
+log("page open");
 const t0 = Date.now();
-while (Date.now() - t0 < 180000) {
-  const ok = await page.evaluate(() => { window.__tryon.step?.(); return window.__tryon.placed; }).catch(() => false);
-  if (ok) break;
+let placed = false;
+while (Date.now() - t0 < 120000) {
+  placed = await page.evaluate(() => { window.__tryon.step?.(); return window.__tryon.placed; }).catch(() => false);
+  if (placed) break;
   await sleep(300);
 }
+log(`ring placed: ${placed}`);
 
-const out = await page.evaluate(() => {
+const out = await page.evaluate(async (wantImage) => {
   for (let i = 0; i < 20; i++) window.__tryon.step();
   document.getElementById("shot").click();
   const card = document.getElementById("shot-card");
@@ -40,19 +47,35 @@ const out = await page.evaluate(() => {
   const after = like.getAttribute("aria-pressed");
   let saved = null;
   try { saved = localStorage.getItem("rinfit-favs"); } catch { /* private mode */ }
-  return {
+  const img = document.getElementById("shot-img");
+  const res = {
     cardShown: !card.hidden,
-    img: document.getElementById("shot-img").src,
+    hasPhoto: (img.src || "").startsWith("data:image/png"),
     likeBefore: before, likeAfter: after, saved,
     favRow: !document.getElementById("fav-wrap").hidden,
     shotLike: document.getElementById("shot-like").getAttribute("aria-pressed")
   };
-});
+  if (wantImage) {
+    // shrink before handing the picture back: the full-size data URL is megabytes of base64 over the
+    // debugging connection and takes longer than everything else put together
+    await img.decode().catch(() => {});
+    const small = document.createElement("canvas");
+    const k = Math.min(1, 900 / (img.naturalWidth || 900));
+    small.width = Math.round((img.naturalWidth || 900) * k);
+    small.height = Math.round((img.naturalHeight || 900) * k);
+    small.getContext("2d").drawImage(img, 0, 0, small.width, small.height);
+    res.img = small.toDataURL("image/jpeg", 0.88);
+    res.size = `${img.naturalWidth}x${img.naturalHeight}`;
+  }
+  return res;
+}, withImage);
+log("shutter pressed, card read");
 
-if (out.img?.startsWith("data:image/png")) {
-  fs.writeFileSync(`${OUT}shot_card.png`, Buffer.from(out.img.split(",")[1], "base64"));
+if (out.img?.startsWith("data:image/jpeg")) {
+  fs.writeFileSync(`${OUT}shot_card.jpg`, Buffer.from(out.img.split(",")[1], "base64"));
+  console.log(`photo: ${out.size} -> ${OUT}shot_card.jpg`);
 }
-console.log(`card shown: ${out.cardShown}   photo written: ${!!out.img}`);
+console.log(`card shown: ${out.cardShown}   photo in card: ${out.hasPhoto}`);
 console.log(`like: ${out.likeBefore} -> ${out.likeAfter}   saved row: ${out.favRow}   heart on card: ${out.shotLike}   localStorage: ${out.saved}`);
 if (errors.length) console.log("errors:", [...new Set(errors)].slice(0, 5).join(" || "));
 await browser.close();
