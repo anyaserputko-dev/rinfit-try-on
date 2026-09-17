@@ -524,7 +524,15 @@ function placeOn(holder, finger, pts, W, m, palm, dt) {
   // Direction along the finger is read in 3D. On the picture this segment collapses to a few pixels whenever
   // the finger points at the lens or curls up — and a direction taken from those pixels is noise, which is
   // exactly when the ring used to spin. In metric space the segment keeps its length whatever the pose.
-  const axis = W[ib].clone().sub(W[ia]).normalize();
+  // The direction the ring sits across comes from the picture, because that is what the shopper sees: a band
+  // built from the metric landmarks alone comes out slanted, since that space has its own orientation and
+  // does not line up with the frame. The metric pair is used only for how far the finger leans towards the
+  // lens, which the picture cannot tell — that keeps the perspective honest without tilting the band.
+  const flat = new THREE.Vector3(B.x - A.x, B.y - A.y, 0);
+  const seen = flat.length() || 1;
+  const spanW = W[ib].clone().sub(W[ia]);
+  const sinLean = spanW.length() > 1e-6 ? THREE.MathUtils.clamp(-spanW.z / spanW.length(), -0.85, 0.85) : 0;
+  const axis = new THREE.Vector3(flat.x, flat.y, seen * sinLean / Math.sqrt(1 - sinLean * sinLean)).normalize();
   // Size stays on the picture. The metric landmarks are normalised to an average hand, not to this shopper's,
   // so sizing from them came out ~1.7x too wide; these three measures are calibrated against real photos and
   // each only shrinks when the hand turns away, hence the largest.
