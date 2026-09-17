@@ -1,0 +1,354 @@
+<title>MetalBar Collection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kumbh+Sans:wght@400;500;700&family=Spline+Sans+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #f3f0ed;
+    --stage: #ebe6e1;
+    --surface: #fbfaf9;
+    --ink: #33312e;
+    --muted: #8d857d;
+    --hair: #ddd5ce;
+    --accent: #ab765e;
+    --shadow: 0 1px 2px rgba(51, 49, 46, .06), 0 8px 24px -16px rgba(51, 49, 46, .35);
+    --display: "Kumbh Sans", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --mono: "Spline Sans Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  :root:not([data-theme="light"]) { color-scheme: light; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #1b1a18;
+      --stage: #232120;
+      --surface: #262422;
+      --ink: #ece7e2;
+      --muted: #968d85;
+      --hair: #383431;
+      --accent: #cf9075;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 10px 28px -18px rgba(0, 0, 0, .9);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #1b1a18;
+    --stage: #232120;
+    --surface: #262422;
+    --ink: #ece7e2;
+    --muted: #968d85;
+    --hair: #383431;
+    --accent: #cf9075;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 10px 28px -18px rgba(0, 0, 0, .9);
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--display);
+    line-height: 1.5;
+  }
+  .wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    padding-inline: 20px;
+    padding-block: 28px 44px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+  .eyebrow {
+    font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); width: 100%;
+  }
+  h1 { font-size: clamp(24px, 4.4vw, 34px); font-weight: 700; letter-spacing: -.015em; text-wrap: balance; }
+  .maker { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+  .stage {
+    position: relative;
+    background: var(--stage);
+    border: 1px solid var(--hair);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    aspect-ratio: 4 / 3;
+    max-height: 68vh;
+    touch-action: none;
+  }
+  @media (max-width: 560px) { .stage { aspect-ratio: 1 / 1; } }
+  .stage canvas { display: block; width: 100%; height: 100%; }
+  .hint {
+    position: absolute; left: 14px; bottom: 12px;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    background: color-mix(in srgb, var(--stage) 78%, transparent);
+    padding: 4px 9px; border-radius: 999px; pointer-events: none;
+    transition: opacity .5s ease;
+  }
+  .loading {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+  }
+  .reset {
+    position: absolute; right: 12px; bottom: 12px;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    background: var(--surface); border: 1px solid var(--hair);
+    padding: 5px 11px; border-radius: 999px; cursor: pointer;
+  }
+  .reset:hover { color: var(--ink); border-color: var(--accent); }
+  .reset:focus-visible, .swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .colours { display: flex; flex-wrap: wrap; gap: 8px; }
+  .swatch {
+    display: flex; align-items: center; gap: 9px;
+    background: var(--surface); border: 1px solid var(--hair);
+    border-radius: 999px; padding: 6px 14px 6px 7px; cursor: pointer;
+    font: inherit; font-size: 13px; color: var(--muted);
+  }
+  .swatch[aria-pressed="true"] { color: var(--ink); border-color: var(--accent); }
+  .chips { display: flex; }
+  .chip { width: 17px; height: 17px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .18); }
+  .chip + .chip { margin-left: -6px; }
+
+  .specs {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+    gap: 1px; background: var(--hair);
+    border: 1px solid var(--hair); border-radius: 12px; overflow: hidden;
+  }
+  .spec { background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+  .spec dt { font-size: 10px; letter-spacing: .13em; text-transform: uppercase; color: var(--muted); }
+  .spec dd { font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .note { font-size: 13px; color: var(--muted); max-width: 62ch; }
+  .note b { color: var(--ink); font-weight: 500; }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">Rinfit · MetalBar · US 7–13</span>
+    <h1>MetalBar</h1>
+    <span class="maker">модель у Blender 5.2 · 49 164 трикутники</span>
+  </header>
+
+  <div class="stage" id="stage">
+    <div class="loading" id="loading">вантажимо модель…</div>
+    <p class="hint" id="hint">тягни, щоб крутити · колесо або два пальці — наблизити</p>
+    <button class="reset" id="reset" type="button">скинути вид</button>
+  </div>
+
+  <div class="colours" id="colours"></div>
+
+  <dl class="specs">
+    <div class="spec"><dt>Ободок</dt><dd>8,0 × 2,0 мм</dd></div>
+    <div class="spec"><dt>Сталева смуга</dt><dd>4,6 мм дуги</dd></div>
+    <div class="spec"><dt>Внутрішній Ø</dt><dd>17,3 мм</dd></div>
+    <div class="spec"><dt>Шевронів усередині</dt><dd>9</dd></div>
+    <div class="spec"><dt>Ціна Rinfit</dt><dd>$24,99</dd></div>
+  </dl>
+
+  <p class="note">
+    Ширина й товщина — <b>з картки товару Rinfit</b> (8 × 2 мм). Решту — форму купола, краї, довжину й
+    положення сталевої смуги, розмір каблучки — <b>підігнано до CAD-фото автоматично</b>: модель рендериться
+    пласкими кольорами по матеріалах і збіг із фото рахується по трьох масках (силует, смуга, внутрішній
+    тунель). Усередині — справжній шеврон-рельєф Rinfit і вирізьблений RINFIT.
+  </p>
+</div>
+
+<script id="glb" type="text/plain">__GLB_BASE64__</script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const COLOURS = [
+  { name: "Black and Gunmetal Gray", silicone: "#1c1c1e", metal: "#8c9095" },
+  { name: "Black and Gold",          silicone: "#1c1c1e", metal: "#cfa53c" }
+];
+
+const stage = document.getElementById("stage");
+const loading = document.getElementById("loading");
+const hint = document.getElementById("hint");
+const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 400);
+const HOME = new THREE.Vector3(-0.62, 0.42, 0.66).normalize();   // ракурс CAD-фото Rinfit
+const fit = { center: new THREE.Vector3(), dist: 46 };
+
+// Оточення для силікону й металу — «світловий тент» із Blender: яскравий верх, темні картки по горизонту.
+function tentTexture() {
+  const c = document.createElement("canvas");
+  c.width = 512; c.height = 256;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "#ffffff");
+  grad.addColorStop(0.42, "#f2efec");
+  grad.addColorStop(0.62, "#cdc6c0");
+  grad.addColorStop(1, "#efeae6");
+  g.fillStyle = grad; g.fillRect(0, 0, 512, 256);
+  g.fillStyle = "rgba(38,35,32,.82)";
+  for (let i = 0; i < 18; i++) g.fillRect(i * 28 + 7, 96, 12, 104);
+  g.fillStyle = "rgba(255,255,255,.9)";
+  g.fillRect(0, 0, 512, 46);
+  const t = new THREE.Texture(c);
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.needsUpdate = true;
+  return t;
+}
+scene.environment = new THREE.PMREMGenerator(renderer).fromEquirectangular(tentTexture()).texture;
+
+const key = new THREE.DirectionalLight(0xffffff, 0.85);
+key.position.set(14, 26, 20); scene.add(key);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.28);
+fillLight.position.set(-20, 8, 14); scene.add(fillLight);
+scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.enablePan = false;
+controls.autoRotate = !calm;
+controls.autoRotateSpeed = 0.9;
+
+const mats = {};
+function applyColour(c) {
+  if (mats.silicone) mats.silicone.color.set(c.silicone);
+  if (mats.metal) mats.metal.color.set(c.metal);
+}
+
+const bar = document.getElementById("colours");
+COLOURS.forEach((c, i) => {
+  const b = document.createElement("button");
+  b.className = "swatch";
+  b.type = "button";
+  b.id = "colour-" + i;
+  b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
+  b.innerHTML = '<span class="chips"><span class="chip" style="background:' + c.silicone +
+    '"></span><span class="chip" style="background:' + c.metal + '"></span></span>' + c.name;
+  b.addEventListener("click", () => {
+    applyColour(c);
+    bar.querySelectorAll(".swatch").forEach(o => o.setAttribute("aria-pressed", "false"));
+    b.setAttribute("aria-pressed", "true");
+  });
+  bar.appendChild(b);
+});
+
+let ring = null, touched = false;
+
+// Кадр по реальній проєкції габаритів, а не по описаній сфері: сфера навколо каблучки
+// набагато більша за її силует, і модель губиться в порожньому кадрі.
+function measure() {
+  if (!ring) return;
+  const box = new THREE.Box3().setFromObject(ring);
+  const c = box.getCenter(new THREE.Vector3());
+  const sph = box.getBoundingSphere(new THREE.Sphere());
+  const vfov = camera.fov * Math.PI / 180;
+  let d = sph.radius / Math.sin(Math.min(vfov, 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect)) / 2);
+  const v = new THREE.Vector3();
+  for (let it = 0; it < 3; it++) {
+    camera.position.copy(c).addScaledVector(HOME, d);
+    camera.lookAt(c);
+    camera.updateMatrixWorld();
+    let ext = 0;
+    for (let i = 0; i < 8; i++) {
+      v.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z)
+        .project(camera);
+      ext = Math.max(ext, Math.abs(v.x), Math.abs(v.y));
+    }
+    d *= ext * 1.05;
+  }
+  fit.center.copy(c);
+  fit.dist = d;
+  controls.minDistance = d * 0.4;
+  controls.maxDistance = d * 2.6;
+}
+
+function home() {
+  controls.target.copy(fit.center);
+  camera.position.copy(fit.center).addScaledVector(HOME, fit.dist);
+  controls.update();
+}
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  measure();
+  if (!touched) home();
+}
+window.addEventListener("resize", resize);
+
+function glbBuffer() {
+  const bin = atob(document.getElementById("glb").textContent.trim());
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+
+new GLTFLoader().parse(glbBuffer(), "", (gltf) => {
+  ring = gltf.scene;
+  ring.traverse((o) => {
+    if (!o.isMesh) return;
+    const m = o.material;
+    if (m.name === "Silicone_A") {
+      mats.silicone = m;
+      m.roughness = 0.68; m.metalness = 0; m.envMapIntensity = 0.30;   // matte-brushed силікон
+    } else if (m.name === "Metal") {
+      mats.metal = m;
+      m.roughness = 0.16; m.metalness = 1; m.envMapIntensity = 1.15;  // полірована сталь
+    }
+  });
+  // модель у мм, вісь пальця +Y: поставити стоячи, каменями вгору
+  ring.rotation.x = -Math.PI / 2;
+  scene.add(ring);
+  applyColour(COLOURS[0]);
+  loading.remove();
+  resize();
+}, () => { loading.textContent = "не вдалося завантажити модель"; });
+
+document.getElementById("reset").addEventListener("click", () => {
+  touched = false;
+  home();
+  controls.autoRotate = !calm;
+});
+["pointerdown", "wheel"].forEach(ev => renderer.domElement.addEventListener(ev, () => {
+  controls.autoRotate = false;
+  touched = true;
+  hint.style.opacity = "0";
+}, { passive: true }));
+
+// тест-хук: у headless Chrome цього Mac requestAnimationFrame не спрацьовує,
+// тому перевірка сама крутить кадри — як у test_site.mjs
+window.__viewer = {
+  get loaded() { return !!ring; },
+  step() { controls.update(); renderer.render(scene, camera); },
+  colour(i) { applyColour(COLOURS[i]); },
+  spin(a) {                                   // тест: обернути каблучку навколо осі пальця
+    ring.rotation.set(-Math.PI / 2, 0, 0);
+    ring.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), a);
+  },
+  png() { return renderer.domElement.toDataURL("image/png"); }
+};
+
+resize();
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>

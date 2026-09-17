@@ -531,7 +531,7 @@ function placeOn(holder, finger, pts, W, m, palm, dt) {
   const flat = new THREE.Vector3(B.x - A.x, B.y - A.y, 0);
   const seen = flat.length() || 1;
   const spanW = W[ib].clone().sub(W[ia]);
-  const sinLean = spanW.length() > 1e-6 ? THREE.MathUtils.clamp(-spanW.z / spanW.length(), -0.85, 0.85) : 0;
+  const sinLean = spanW.length() > 1e-6 ? THREE.MathUtils.clamp(-spanW.z / spanW.length(), -0.6, 0.6) : 0;
   const axis = new THREE.Vector3(flat.x, flat.y, seen * sinLean / Math.sqrt(1 - sinLean * sinLean)).normalize();
   // Size stays on the picture. The metric landmarks are normalised to an average hand, not to this shopper's,
   // so sizing from them came out ~1.7x too wide; these three measures are calibrated against real photos and
@@ -539,7 +539,15 @@ function placeOn(holder, finger, pts, W, m, palm, dt) {
   const fingerWidth = Math.max(m.spacing2 * 0.86, pts[0].distanceTo(pts[9]) * 0.185, A.distanceTo(B) * 0.42)
                       * widthK * state.fit;
   const scale = fingerWidth / (INNER_RADIUS * 2);
-  const zAxis = palm.clone().sub(axis.clone().multiplyScalar(palm.dot(axis))).normalize();
+  // When the finger points at the lens the stone's direction and the finger's line up, and the difference
+  // between them collapses to nothing — normalising that gave the ring coordinates that are not numbers, and
+  // a ring with those simply never appears. Any roll looks the same from straight on, so take a steady one.
+  const zAxis = palm.clone().sub(axis.clone().multiplyScalar(palm.dot(axis)));
+  if (zAxis.lengthSq() < 1e-5) {
+    zAxis.set(0, 1, 0).sub(axis.clone().multiplyScalar(axis.y));
+    if (zAxis.lengthSq() < 1e-5) zAxis.set(1, 0, 0).sub(axis.clone().multiplyScalar(axis.x));
+  }
+  zAxis.normalize();
   const xAxis = new THREE.Vector3().crossVectors(axis, zAxis).normalize();
   const quat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
   window.__tryon.fit = { finger, fingerWidth: +fingerWidth.toFixed(1), knob: +state.fit.toFixed(3),
@@ -550,6 +558,10 @@ function placeOn(holder, finger, pts, W, m, palm, dt) {
   const pos = A.lerp(B, t);
   pos.x += state.offset.x;      // where the shopper dragged it
   pos.y += state.offset.y;
+  // Never hand the ring a value that is not a number: it would vanish with nothing said.
+  if (![pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w, scale].every(Number.isFinite)) {
+    return { finger, skipped: "not a number" };
+  }
 
   // Hand tracking wobbles by a few pixels every frame, and tracking now runs slower than drawing.
   // Smooth the ring's own pose instead of the landmarks: heavily while the hand is still, lightly while it

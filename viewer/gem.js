@@ -5,12 +5,12 @@
 // renders (blender/rinfit.py _tent_world + soft boxes), set in view space, so web and renders read alike.
 import * as THREE from "three";
 
-// A 16-sector stone has ~180 facet planes; rectangles with split girdles go to ~580. The planes live in a
-// fragment uniform array and the trace loops over them, so the shader is compiled per stone with exactly the
-// count that stone needs: a fixed 384 made phones compile (and sometimes unroll) a loop twice the size they
-// ever use, and phones have a quarter of the desktop uniform budget. A stone whose planes get truncated leaks
-// light and renders pale, so say so when the budget still does not fit.
-const DEFAULT_BUDGET = 384;
+// A 16-sector stone has ~180 facet planes; rectangles with split girdles go to ~580. They used to live in a
+// fragment uniform array, which a phone has a quarter as much of as a laptop — so on a phone the stone was
+// either cut short (pale, leaking light) or dropped for the flat stand-in, and that is exactly what a shopper
+// holds in their hand. The planes now travel in a texture, which phones have plenty of, so every device traces
+// the whole stone; only the number of bounces is still tuned per device.
+const MAX_PLANES = 640;
 
 // Unique outward facet planes (normal, distance) of a convex mesh, in the mesh's local space.
 export function facetPlanes(geometry) {
@@ -53,9 +53,10 @@ const vertexShader = /* glsl */ `
   }
 `;
 
-const fragmentShaderFor = (n) => /* glsl */ `
-  #define MAX_PLANES ${n}
-  uniform vec4 uPlanes[MAX_PLANES];
+const fragmentShader = /* glsl */ `
+  #define MAX_PLANES ${MAX_PLANES}
+  uniform sampler2D uPlanes;   // one facet plane per texel: xyz = outward normal, w = distance
+  uniform float uTexel;
   uniform int uCount;
   uniform float uIor;
   uniform float uDispersion;
@@ -117,16 +118,16 @@ const fragmentShaderFor = (n) => /* glsl */ `
       for (int i = 0; i < MAX_PLANES; i++) {
         if (i >= uCount) break;
         if (i == last) continue;
-        vec3 pn = uPlanes[i].xyz;
-        float den = dot(t, pn);
+        vec4 pl = texture2D(uPlanes, vec2((float(i) + 0.5) * uTexel, 0.5));
+        float den = dot(t, pl.xyz);
         if (den > 1e-5) {
-          float s = (uPlanes[i].w - dot(p, pn)) / den;
+          float s = (pl.w - dot(p, pl.xyz)) / den;
           if (s > -1e-4 && s < tmin) { tmin = s; hit = i; }
         }
       }
       if (hit < 0) break;
       p += t * tmin;
-      vec3 nn = uPlanes[hit].xyz;
+      vec3 nn = texture2D(uPlanes, vec2((float(hit) + 0.5) * uTexel, 0.5)).xyz;
       last = hit;
       vec3 outG = refract(t, -nn, uIor);
       if (dot(outG, outG) < 1e-6) { t = reflect(t, -nn); continue; }   // total internal reflection
@@ -160,18 +161,22 @@ export function simpleStoneMaterial({ black = false } = {}) {
   });
 }
 
-export function stoneMaterial(geometry, { black = false, budget = DEFAULT_BUDGET, bounces } = {}) {
+export function stoneMaterial(geometry, { black = false, bounces } = {}) {
   const all = facetPlanes(geometry);
-  const cap = Math.max(16, Math.min(budget, DEFAULT_BUDGET * 2));
-  if (all.length > cap) console.warn(`gem: stone has ${all.length} facet planes, only ${cap} traced`);
-  const planes = all.slice(0, cap);
+  if (all.length > MAX_PLANES) console.warn(`gem: stone has ${all.length} facet planes, only ${MAX_PLANES} traced`);
+  const planes = all.slice(0, MAX_PLANES);
   const n = Math.max(1, planes.length);
-  const packed = Array.from({ length: n }, (_, i) =>
-    planes[i] ? new THREE.Vector4(planes[i].n.x, planes[i].n.y, planes[i].n.z, planes[i].d) : new THREE.Vector4());
+  const data = new Float32Array(n * 4);
+  planes.forEach((p, i) => data.set([p.n.x, p.n.y, p.n.z, p.d], i * 4));
+  const tex = new THREE.DataTexture(data, n, 1, THREE.RGBAFormat, THREE.FloatType);
+  tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
   const mat = new THREE.ShaderMaterial({
     name: black ? "CZ_Black_traced" : "CZ_traced",
     uniforms: {
-      uPlanes: { value: packed },
+      uPlanes: { value: tex },
+      uTexel: { value: 1 / n },
       uCount: { value: n },
       uIor: { value: 2.16 },
       uDispersion: { value: black ? 0 : 0.015 },
@@ -180,8 +185,8 @@ export function stoneMaterial(geometry, { black = false, budget = DEFAULT_BUDGET
       uTint: { value: new THREE.Color(black ? 0x000000 : 0xffffff) },
       uExposure: { value: black ? 0.9 : 1.0 }
     },
-    vertexShader, fragmentShader: fragmentShaderFor(n)
+    vertexShader, fragmentShader
   });
-  mat.userData.gem = { black, planes: all.length, traced: n, truncated: all.length > cap };
+  mat.userData.gem = { black, planes: all.length, traced: n, truncated: all.length > MAX_PLANES };
   return mat;
 }
