@@ -50,8 +50,8 @@ button:focus-visible,a:focus-visible,label:focus-within{outline:2px solid var(--
 .fingers button[aria-pressed="true"]{background:var(--warm);box-shadow:inset 0 0 0 1px var(--ink)}
 /* the hand over the camera: a thin line drawing of how to hold it, shown until a usable hand is in the frame */
 .guide{position:absolute;z-index:4;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:56px 16px 96px;pointer-events:none;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.45)}
-.guide svg{width:min(40%,190px);height:auto;max-height:50%;overflow:visible;margin-bottom:18px}
-.guide .hand{fill:none;stroke:#fff;stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+.guide svg{width:min(42%,200px);height:auto;max-height:50%;overflow:visible;margin-bottom:14px}
+.guide .hand{fill:none;stroke:#fff;stroke-width:.22;stroke-linejoin:round;stroke-linecap:round;filter:drop-shadow(0 .1px .25px rgba(0,0,0,.4))}
 .guide b{font-size:21px;font-weight:600;letter-spacing:.01em;text-align:center}
 .guide p{margin:0;font-size:14.5px;font-weight:400;line-height:1.4;opacity:.92;text-align:center;white-space:pre-line;max-width:300px}
 /* the photo a shopper keeps: their hand, the ring, and whose ring it is */
@@ -146,7 +146,7 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
     </div>
     <div class="hint" id="hint">Drag to rotate the ring</div>
     <div class="guide" id="guide" hidden aria-live="polite">
-      <svg viewBox="0 0 220 320" aria-hidden="true"><path class="hand" d="M 82 306 C 78 280 76 250 74 226 C 60 212 38 194 30 178 C 23 164 34 152 45 160 C 58 170 66 182 70 190 L 68 176 L 66.7 156.4 L 50.7 68.4 A 13.5 13.5 0 0 1 77.3 63.6 L 93.3 151.6 L 95.0 144.4 L 92.0 40.4 A 14 14 0 0 1 120.0 39.6 L 123.0 143.6 L 124.6 146.5 L 134.6 56.5 A 13.5 13.5 0 0 1 161.4 59.5 L 151.4 149.5 L 153.8 163.2 L 169.8 99.2 A 11.5 11.5 0 0 1 192.2 104.8 L 176.2 168.8 C 186 210 186 260 180 306"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><g class="hand"><path d="M8 13v-7.5a1.5 1.5 0 0 1 3 0v6.5"/><path d="M11 5.5v-2a1.5 1.5 0 1 1 3 0v8.5"/><path d="M14 5.5a1.5 1.5 0 0 1 3 0v6.5"/><path d="M17 7.5a1.5 1.5 0 0 1 3 0v8.5a6 6 0 0 1 -6 6h-2h.208a6 6 0 0 1 -5.012 -2.7a69.74 69.74 0 0 1 -.196 -.3c-.312 -.479 -1.407 -2.388 -3.286 -5.728a1.5 1.5 0 0 1 .536 -2.022a1.867 1.867 0 0 1 2.28 .28l1.47 1.47"/></g></svg>
       <b id="guide-title">Raise your hand</b>
       <p id="guide-text">Back of hand facing the camera</p>
     </div>
