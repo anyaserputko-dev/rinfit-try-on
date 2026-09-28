@@ -42,24 +42,6 @@ export function parseColor(name) {
 // model:      optional { url, scale, bandLength } — a real GLB file replaces the procedural ring
 export const RINGS = [
   {
-    id: "infinity-men", name: "Men's Infinity", family: "Infinity Collection · 9 mm", price: 16.99,
-    colors: ["Blue", "Olive", "Red", "White"],
-    view: "band",
-    spec: { kind: "band", style: "step", width: 9, thickness: 2, finish: "matte", logo: true },
-    model: { url: "models/infinity-men.glb", bandLength: 9 },
-    img: IMG("infman1050-1-9_18d13299-ebbd-4335-af4f-eb156df55e3e.jpg"),
-    url: PDP("copy-of-mens-infinity-silicone-ring-soft-comfortable-durable-wedding-band-us-design-patent")
-  },
-  {
-    id: "step-edge", name: "Inner Step Edge", family: "Floating Collection · 9 mm", price: 16.99,
-    colors: ["Light Gray", "Steel Blue"],
-    view: "band",
-    spec: { kind: "band", style: "dome", width: 9, thickness: 2, finish: "matte", innerStep: true, engrave: true },
-    model: { url: "models/step-edge.glb", bandLength: 9 },
-    img: IMG("3_7c0bcd0d-3249-49bc-bb87-0ceab86d060c.jpg"),
-    url: PDP("copy-of-inner-step-edge-collection-silicone-ring-for-men-patent-pending")
-  },
-  {
     id: "couture", name: "Couture Stackable", family: "Couture Collection · 2.5 mm", price: 9.99,
     colors: ["White", "Pastel Purple", "Turquoise", "Burgundy", "Pastel Pink", "Ocean"],
     palette: { "White": "#e9ecf1", "Ocean": "#2b6670" },
@@ -143,15 +125,4 @@ export const RINGS = [
     img: IMG("main_round2..jpg"),
     url: PDP("frosted-clear-round")
   },
-  {
-    id: "black-oval", name: "Black Oval CZ · 12×8 mm", family: "GlowStone · 3-piece stack", price: 59.99,
-    colors: ["Black and Rose Gold"],
-    view: "top",
-    spec: { kind: "stone", cut: "oval", w: 8, l: 12, band: { width: 6, thickness: 2 }, mount: "low", blackStone: true,
-            chevrons: { width: 2, amplitude: 2.6 /* est. */ } },
-    // bandLength is what rests on the finger (the stack round the back), not the V apex-to-apex span of 17.4
-    model: { url: "models/black-oval.glb", bandLength: 10.5 },
-    img: IMG("01_2_86588659-a271-489c-829e-dfdde773c45e.jpg"),
-    url: PDP("silicone-ring-stackable-set-14x7-mm-marquise-cut-cz-patent-pending-design-glowstone-collection-copy")
-  }
 ];

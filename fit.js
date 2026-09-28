@@ -119,10 +119,15 @@ export function measureFingerWidth(src, lms, W, H, finger, prior, probe) {
   const sigma = Math.max(2.5, spread * 1.6);                        // camera noise on the chroma, at least a little
   const isSkin = (c) => Math.hypot(c[1] - Cb0, c[2] - Cr0) < sigma * 3.2 && Math.abs(c[0] - Y0) < 0.55 * Y0 + 28;
 
-  // walk out until the picture stops being this finger for HOLD pixels in a row; snap to the sharpest
-  // brightness step next to that spot, which is where the eye puts the edge
+  // Two ways to see the edge of the finger, and the nearer of the two wins:
+  //  - colour: walk out until the picture stops being this finger's colour for HOLD pixels in a row (snapped
+  //    to the sharpest brightness step next to that spot). Fails on skin over skin and on grey photos;
+  //  - shading: the first clear brightness step out from the middle — a finger always has a shadow line
+  //    along its side, on a face or a palm behind it as much as on a wall. Skin texture is far weaker than
+  //    that line, so the step has to be a local peak well above the ripple inside the finger.
+  const gradAt = (arr, i) => (i > 0 && i < arr.length - 1 ? Math.abs(arr[i + 1].c[0] - arr[i - 1].c[0]) / 2 : 0);
   const edge = (arr) => {
-    let run = 0;
+    let colour = null, run = 0;
     for (let i = 0; i < arr.length; i++) {
       run = isSkin(arr[i].c) ? 0 : run + 1;
       if (run >= HOLD) {
@@ -131,16 +136,31 @@ export function measureFingerWidth(src, lms, W, H, finger, prior, probe) {
           const gr = Math.abs(arr[j].c[0] - arr[j - 1].c[0]);
           if (gr > best) { best = gr; bestK = j; }
         }
-        return best > 6 ? arr[bestK].d - step / 2 : arr[k].d;
+        colour = best > 6 ? arr[bestK].d - step / 2 : arr[k].d;
+        break;
       }
     }
-    return null;
+    // ripple: how much the brightness wobbles inside the finger, from the inner quarter of the walk
+    const inner = Math.max(3, Math.floor((prior * 0.25) / step));
+    let ripple = 0;
+    for (let i = 1; i < inner && i < arr.length - 1; i++) ripple = Math.max(ripple, gradAt(arr, i));
+    const need = Math.max(7, ripple * 2.2);
+    let shade = null;
+    for (let i = inner; i < arr.length - 1; i++) {
+      const g = gradAt(arr, i);
+      if (g >= need && g >= gradAt(arr, i - 1) && g >= gradAt(arr, i + 1)) { shade = arr[i].d; break; }
+    }
+    if (colour === null) return shade === null ? null : { d: shade, how: "shade" };
+    if (shade === null) return { d: colour, how: "colour" };
+    return shade < colour ? { d: shade, how: "shade" } : { d: colour, how: "colour" };
   };
 
-  const widths = [], edges = [];
+  const widths = [], edges = [], hows = {};
   let assumed = 0, seen = 0;
   lines.forEach((l, i) => {
-    let eL = edge(l.L), eR = edge(l.R);
+    const rL = edge(l.L), rR = edge(l.R);
+    let eL = rL ? rL.d : null, eR = rR ? rR.d : null;
+    for (const r of [rL, rR]) if (r) hows[r.how] = (hows[r.how] || 0) + 1;
     seen += (eL !== null) + (eR !== null);
     // no edge before the next finger: the two are touching, so the edge is halfway between their axes
     if (eL === null && bLeft) { eL = bLeft * 0.5; assumed++; }
@@ -153,7 +173,7 @@ export function measureFingerWidth(src, lms, W, H, finger, prior, probe) {
   const width = median(widths);
   const mad = median(widths.map((w) => Math.abs(w - width)));
   if (mad > width * 0.14) return null;                              // the cuts disagree: nothing to trust
-  return { width, ratio: width / prior, edges, cuts: widths.length, assumed };
+  return { width, ratio: width / prior, edges, cuts: widths.length, assumed, how: hows };
 }
 
 /* What the shopper should do with the hand, judged from the landmarks in stage pixels (y up).

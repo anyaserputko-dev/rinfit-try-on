@@ -21,7 +21,7 @@ const hint = $("hint"), loader = $("loader");
 const params = new URLSearchParams(location.search);
 
 const state = {
-  ring: RINGS.find((r) => r.id === params.get("ring")) || RINGS[4],
+  ring: RINGS.find((r) => r.id === params.get("ring")) || RINGS.find((r) => r.id === "emerald") || RINGS[0],
   color: null, finger: params.get("finger") || "ring", mode: "3d", facing: "user",
   stream: null, landmarker: null, lmMode: null, hand: null, lastSeen: 0, lastVideoTime: -1, lastDetect: 0,
   w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }, capturing: false,
@@ -525,6 +525,9 @@ function mapper(srcW, srcH) {
 // Finger width from the landmarks alone, in stage pixels. The metric landmarks are normalised to an average
 // hand, not to this shopper's, so sizing from them came out ~1.7x too wide; these three measures are
 // calibrated against real photos and each only shrinks when the hand turns away, hence the largest.
+// A third route was tried and dropped (28.09.2026): scaling a fixed finger width by "picture pixels per metric
+// unit" read off the metric landmarks. Their scale is not stable between poses — the same finger came out at
+// 0.009 units on an open hand and 0.017 on a fist — so it cannot size anything. The picture (fit.js) can.
 function landmarkWidth(finger, pts, m) {
   const [ia, ib, widthK] = FINGERS[finger];
   const A = pts[ia], B = pts[ib];
@@ -549,7 +552,7 @@ function placeOn(holder, finger, pts, W, m, palm, dt, ratio = 1) {
   // Size: the landmark estimate, corrected by how wide the finger actually looks in the picture (fit.js),
   // and on a photo by the shopper's pinch.
   const fingerWidth = landmarkWidth(finger, pts, m) * ratio * state.fit;
-  const scale = fingerWidth / (INNER_RADIUS * 2);
+  const scale = fingerWidth * 0.965 / (INNER_RADIUS * 2);   // a silicone band sits snug, a touch under the finger's width
   // When the finger points at the lens the stone's direction and the finger's line up, and the difference
   // between them collapses to nothing — normalising that gave the ring coordinates that are not numbers, and
   // a ring with those simply never appears. Any roll looks the same from straight on, so take a steady one.
@@ -745,10 +748,11 @@ function autoRatio(srcW, srcH, pts, measure) {
   const src = live ? video : photo;
   const r = measureFingerWidth(src, state.hand.lms, srcW, srcH, state.finger, prior, { canvas: probe, ctx: probeCtx });
   if (r) {
-    const target = THREE.MathUtils.clamp(r.ratio, 0.7, 1.35);
+    const target = THREE.MathUtils.clamp(r.ratio, 0.6, 1.25);
     a.ratio = live ? a.ratio + (target - a.ratio) * 0.3 : target;
     a.lastGood = now;
-    a.last = { width: +r.width.toFixed(1), prior: +prior.toFixed(1), ratio: +r.ratio.toFixed(3), cuts: r.cuts, assumed: r.assumed };
+    a.last = { width: +r.width.toFixed(1), prior: +prior.toFixed(1), ratio: +r.ratio.toFixed(3), cuts: r.cuts, assumed: r.assumed,
+               how: r.how };
     if (SHOW_EDGES) {
       const P = mapper(srcW, srcH);
       window.__tryon.edges = r.edges.map(([x, y]) => { const q = P({ x: x / srcW, y: y / srcH, z: 0 }); return [q.x, q.y]; });
@@ -757,7 +761,7 @@ function autoRatio(srcW, srcH, pts, measure) {
     a.ratio += (1 - a.ratio) * 0.05;
   } else if (!live) {
     a.ratio = 1;
-    a.last = null;
+    a.last = { width: null, prior: +prior.toFixed(1) };
     window.__tryon.edges = null;
   }
   return a.ratio;
