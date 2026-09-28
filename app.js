@@ -14,6 +14,7 @@ const FINGERS = { index: [5, 6, 1.05], middle: [9, 10, 1.07], ring: [13, 14, 1.0
 const NEIGHBOR = { index: "middle", middle: "ring", ring: "middle", pinky: "ring" };
 const RING_POS = +(new URLSearchParams(location.search).get("fitpos") ?? 0.42);   // between knuckle and middle joint
 const SMOOTH = 0.5;       // landmark smoothing for live video
+const OUTER_K = +(new URLSearchParams(location.search).get("outer") ?? 1.08);   // band outer width / finger width
 
 const $ = (id) => document.getElementById(id);
 const stage = $("stage"), canvas = $("gl"), video = $("video"), photo = $("photo");
@@ -248,6 +249,9 @@ function addToAr(holder, piece) {
   occluder.renderOrder = -1;
   holder.add(occluder, piece.group);
   holder.userData.bandLength = piece.bandLength;
+  // how wide the band is across the finger, outer edge to outer edge (ring axis is Y, the stone rides +Z)
+  const box = new THREE.Box3().setFromObject(piece.group);
+  holder.userData.outerX = box.isEmpty() ? INNER_RADIUS * 2 * 1.25 : box.max.x - box.min.x;
 }
 
 // Product-photo angles: which way the stone (local Z) and the finger axis (local Y) point.
@@ -552,7 +556,10 @@ function placeOn(holder, finger, pts, W, m, palm, dt, ratio = 1) {
   // Size: the landmark estimate, corrected by how wide the finger actually looks in the picture (fit.js),
   // and on a photo by the shopper's pinch.
   const fingerWidth = landmarkWidth(finger, pts, m) * ratio * state.fit;
-  const scale = fingerWidth * 0.965 / (INNER_RADIUS * 2);   // a silicone band sits snug, a touch under the finger's width
+  // Sized by the band's OUTER edge, not the hole: on a real hand a silicone band shows only a little past the
+  // finger's silhouette, whatever its thickness — the flesh gives, the band hugs. Sizing by the hole made every
+  // thick band look a size too big, and worse as the hand came closer.
+  const scale = fingerWidth * OUTER_K / (holder.userData.outerX || INNER_RADIUS * 2.5);
   // When the finger points at the lens the stone's direction and the finger's line up, and the difference
   // between them collapses to nothing — normalising that gave the ring coordinates that are not numbers, and
   // a ring with those simply never appears. Any roll looks the same from straight on, so take a steady one.
@@ -770,9 +777,9 @@ function autoRatio(srcW, srcH, pts, measure) {
 /* What the stage says over the picture: the hand outline while there is no usable hand, a one-line hint when
    the hand is there but not right, nothing while the ring is on. */
 const GUIDE_TEXT = {
-  none: "Show your left or right hand to the camera.\nKeep your fingers pointing up.",
-  down: "Turn your hand so your fingers point up\nto try the ring on.",
-  capture: "Hold your hand like this,\nthen press the round button."
+  none: ["Raise your hand", "Back of hand facing the camera"],
+  down: ["Fingers up", "Turn your hand so the fingers point up"],
+  capture: ["Raise your hand", "Then press the round button"]
 };
 const HINT_TEXT = {
   far: "Move your hand a little closer to the camera",
@@ -783,7 +790,7 @@ function showGuide(status) {
   const guide = $("guide");
   const outline = status in GUIDE_TEXT;
   guide.hidden = !outline;
-  if (outline) $("guide-text").textContent = GUIDE_TEXT[status];
+  if (outline) { $("guide-title").textContent = GUIDE_TEXT[status][0]; $("guide-text").textContent = GUIDE_TEXT[status][1]; }
   if (state.mode === "live") setHint(HINT_TEXT[status] || "");
   else if (!state.capturing) setHint(status === "ok" ? "Drag the ring · pinch to resize" : HINT_TEXT[status] || hint.textContent);
   state.pose = status;
@@ -916,7 +923,7 @@ async function setMode(mode) {
   state.upBad = state.farBad = false;
   if (mode !== "live") stopCamera();
   state.tracking = false;
-  state.pose = "none";
+  state.pose = null;   // so the first tracker result, even "no hand", puts the guide up
   if (mode !== "photo") photo.hidden = true;
   arMain.visible = arSecond.visible = false;
   arMain.userData.pose = arSecond.userData.pose = null;
