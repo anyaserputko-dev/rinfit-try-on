@@ -7,7 +7,7 @@ A working prototype of a virtual ring try-on for a Shopify product page. Not an 
 ## What it does
 
 - **3D view** — rotate and zoom the selected ring.
-- **Live try-on** — the phone or laptop camera finds the hand and places the ring on the chosen finger in real time.
+- **Live try-on** — the phone or laptop camera finds the hand and places the ring on the chosen finger in real time. A hand outline shows how to hold the hand (either hand, fingers up); the ring is taken off and the shopper is told what to change while the hand is held wrong, and it comes back by itself.
 - **Photo** — the same try-on on an uploaded photo, for shoppers who do not want to turn the camera on.
 - Switch rings, colors and fingers; save a snapshot.
 
@@ -16,7 +16,8 @@ Product names, prices, color options and photos come from rinfit.com (15 Septemb
 ## How it works
 
 - Hand tracking: [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) running in the browser. The camera image is processed on the device and never uploaded.
-- Placement: the ring sits between the knuckle and the middle joint of the finger. Finger width is estimated from knuckle spacing, palm length and finger segment length. The stone faces the back of the hand.
+- Placement: the ring sits between the knuckle and the middle joint of the finger. The stone faces the back of the hand.
+- Size: the landmarks give a first estimate of the finger's width (knuckle spacing, palm length, segment length); `fit.js` then reads the finger's real visible width off the frame — five cuts across the finger, edges by chroma with the neighbouring fingers as bounds — and the ring is scaled to it, smoothed over time. No manual size control; on a still photo the shopper can still pinch. It is a visual fit, not a jewellery size: that needs a reference object in the frame.
 - Realism: an invisible "finger" cylinder hides the back half of the ring, so the band wraps around the finger instead of floating on top.
 - Rendering: three.js. Each ring is rebuilt from its product page: band width and thickness, stone cut and size, setting type, set composition, and colors sampled from the variant photos. Sets of two separate rings put the second ring on the neighbouring finger, as in Rinfit's lifestyle photos.
 - Palm or back of the hand is decided by anatomy (the thumb sits on the palm side), not by the handedness label, which is unreliable on photos.
@@ -31,7 +32,8 @@ Each ring is modelled in Blender 5.2 from its product page and images, then expo
 - `blender/build.py` — builds a ring headless, renders the views, saves an editable `.blend`, exports `models/<ring>.glb`:
   `Blender -b --factory-startup -P blender/build.py -- ring=oval views=hero,nude export=1`
 - `blender/compare.py` — side-by-side sheet: Rinfit product render next to ours, both cropped to the object.
-- `blender/test_site.mjs` — headless check of the site (3D view and photo try-on) without a camera.
+- `blender/test_site.mjs` — headless check of the site (3D view and photo try-on) without a camera; `?edges=1` draws where the finger's edges were read.
+- `blender/test_live.mjs` — the live try-on with a fake camera (`blender/test/live/*.y4m`): fingers up, fingers down, hand far away, two hands.
 
 Model contract with the app: millimetres, ring axis along +Y, stone towards +Z, inner diameter 17.32 mm (US 7). Material names say what to recolour per variant: `Silicone_A` / `Silicone_B` (band colours), `Metal` (Silver or Rose Gold), `CZ` / `CZ_Black` (stones).
 
@@ -45,6 +47,7 @@ Model contract with the app: millimetres, ring axis along +Y, stone towards +Z, 
 | --- | --- |
 | `index.html` | Page layout and styles |
 | `app.js` | Camera, hand tracking, ring placement, UI |
+| `fit.js` | Finger width read from the picture; hand pose checks |
 | `rings.js` | Procedural 3D ring models |
 | `catalog.js` | Rinfit products used in the demo |
 

@@ -4,6 +4,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RINGS, METAL, parseColor, bandHex } from "./catalog.js";
 import { createRing, setGemEnvironment, INNER_RADIUS, siliconeMat, frostedMat, metalMat, gemMeshes } from "./rings.js";
 import { stoneMaterial, simpleStoneMaterial } from "./gem.js";
+import { measureFingerWidth, handPose } from "./fit.js";
 
 const MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
@@ -23,14 +24,17 @@ const state = {
   ring: RINGS.find((r) => r.id === params.get("ring")) || RINGS[4],
   color: null, finger: params.get("finger") || "ring", mode: "3d", facing: "user",
   stream: null, landmarker: null, lmMode: null, hand: null, lastSeen: 0, lastVideoTime: -1, lastDetect: 0,
-  w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }, capturing: false
+  w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }, capturing: false,
+  // what the picture says about the finger's width, on top of the landmark estimate (1 = trust the landmarks)
+  auto: { ratio: 1, lastGood: 0, lastTick: -1, photoDone: false }, pose: "none", upBad: false, farBad: false
 };
 state.color = state.ring.colors.includes(params.get("color")) ? params.get("color") : state.ring.colors[0];
-// Hand tracking only estimates how wide a finger is; on a hand held close or at an angle it can be off,
-// so the shopper can nudge the ring's size and the page remembers it.
-let stored = null;
-try { stored = localStorage.getItem("rinfit-fit"); } catch { /* private mode */ }
-state.fit = clampFit(+(params.get("fitscale") ?? stored ?? 1));
+// The ring sizes itself to the finger in the picture (fit.js). On a still photo the shopper can still pinch
+// to fine-tune; `fitscale` exists for the headless tests.
+state.fit = clampFit(+(params.get("fitscale") ?? 1));
+const SHOW_EDGES = params.get("edges") === "1";
+const probe = document.createElement("canvas");
+const probeCtx = probe.getContext("2d", { willReadFrequently: true });
 window.__tryon = { ready: false, built: false, placed: false, error: null, debug: null };
 
 /* ---------- renderer & scenes ---------- */
@@ -368,28 +372,24 @@ function clampFit(v) {
 
 function setFit(value) {
   state.fit = clampFit(value);
-  $("fit-value").textContent = `${Math.round(state.fit * 100)}%`;
-  try { localStorage.setItem("rinfit-fit", String(state.fit)); } catch { /* private mode */ }
 }
-$("fit-down").onclick = () => setFit(state.fit - 0.06);
-$("fit-up").onclick = () => setFit(state.fit + 0.06);
-setFit(state.fit);
 
 /* ---------- putting it on by hand ----------
-   Tracking gets the ring near the right place; the shopper finishes the job the way they would in front of a
-   mirror: drag it along the finger, pinch to size it. Photo mode is where this matters — the hand is still. */
+   On a still photo the shopper can finish the job the way they would in front of a mirror: drag the ring along
+   the finger, pinch to size it. Live video sizes and places itself; a hand in motion is nothing to drag on. */
 const touches = new Map();
 let pinchFrom = 0;
 
 function resetAdjust() {
   state.offset.x = state.offset.y = 0;
+  if (!params.get("fitscale")) state.fit = 1;
   touches.clear();
   pinchFrom = 0;
 }
 
 stage.addEventListener("pointerdown", (e) => {
-  if (state.mode === "3d" || !$("shot-card").hidden || !$("photo-intro").hidden) return;
-  if (e.target.closest("button, .modes, .fingers, .fit")) return;   // the controls keep their taps
+  if (state.mode !== "photo" || state.capturing || !$("shot-card").hidden || !$("photo-intro").hidden) return;
+  if (e.target.closest("button, .modes, .fingers")) return;   // the controls keep their taps
   stage.setPointerCapture(e.pointerId);
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (touches.size === 2) {
@@ -462,14 +462,18 @@ async function getLandmarker(runningMode) {
   return state.landmarker;
 }
 
-// Pick the biggest detected hand
-function pickHand(result) {
+// Pick the hand to dress. Either hand will do; with two in the frame, the one held fingers-up wins, and the
+// hand already being tracked keeps its place unless the other is clearly bigger — so the ring does not hop
+// between hands from frame to frame.
+function pickHand(result, live) {
   if (!result.landmarks?.length) return null;
-  let best = 0, bestArea = -1;
+  let best = 0, bestScore = -1;
   result.landmarks.forEach((l, i) => {
     const xs = l.map((p) => p.x), ys = l.map((p) => p.y);
-    const area = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
-    if (area > bestArea) { bestArea = area; best = i; }
+    let score = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    if (live && l[9].y > l[0].y) score *= 0.3;                                   // fingers hanging down
+    if (live && state.hand && result.handedness[i][0].categoryName === state.hand.handed) score *= 1.4;
+    if (score > bestScore) { bestScore = score; best = i; }
   });
   return {
     lms: result.landmarks[best],
@@ -481,7 +485,7 @@ function pickHand(result) {
 }
 
 function onResult(result, live) {
-  const hand = pickHand(result);
+  const hand = pickHand(result, live);
   if (!hand) return false;
   if (live && state.hand && state.hand.handed === hand.handed && performance.now() - state.lastSeen < 300) {
     const blend = (prev, next) => prev.map((p, i) => {
@@ -518,8 +522,17 @@ function mapper(srcW, srcH) {
        40 px on the same hand. Drawing the found edges over the photo showed them off the finger entirely.
    Anything new here has to be checked the same way — overlay the edges it finds on a real photo first. */
 
-function placeOn(holder, finger, pts, W, m, palm, dt) {
+// Finger width from the landmarks alone, in stage pixels. The metric landmarks are normalised to an average
+// hand, not to this shopper's, so sizing from them came out ~1.7x too wide; these three measures are
+// calibrated against real photos and each only shrinks when the hand turns away, hence the largest.
+function landmarkWidth(finger, pts, m) {
   const [ia, ib, widthK] = FINGERS[finger];
+  const A = pts[ia], B = pts[ib];
+  return Math.max(m.spacing2 * 0.86, pts[0].distanceTo(pts[9]) * 0.185, A.distanceTo(B) * 0.42) * widthK;
+}
+
+function placeOn(holder, finger, pts, W, m, palm, dt, ratio = 1) {
+  const [ia, ib] = FINGERS[finger];
   const A = pts[ia].clone(), B = pts[ib].clone();
   // Direction along the finger is read in 3D. On the picture this segment collapses to a few pixels whenever
   // the finger points at the lens or curls up — and a direction taken from those pixels is noise, which is
@@ -533,11 +546,9 @@ function placeOn(holder, finger, pts, W, m, palm, dt) {
   const spanW = W[ib].clone().sub(W[ia]);
   const sinLean = spanW.length() > 1e-6 ? THREE.MathUtils.clamp(-spanW.z / spanW.length(), -0.6, 0.6) : 0;
   const axis = new THREE.Vector3(flat.x, flat.y, seen * sinLean / Math.sqrt(1 - sinLean * sinLean)).normalize();
-  // Size stays on the picture. The metric landmarks are normalised to an average hand, not to this shopper's,
-  // so sizing from them came out ~1.7x too wide; these three measures are calibrated against real photos and
-  // each only shrinks when the hand turns away, hence the largest.
-  const fingerWidth = Math.max(m.spacing2 * 0.86, pts[0].distanceTo(pts[9]) * 0.185, A.distanceTo(B) * 0.42)
-                      * widthK * state.fit;
+  // Size: the landmark estimate, corrected by how wide the finger actually looks in the picture (fit.js),
+  // and on a photo by the shopper's pinch.
+  const fingerWidth = landmarkWidth(finger, pts, m) * ratio * state.fit;
   const scale = fingerWidth / (INNER_RADIUS * 2);
   // When the finger points at the lens the stone's direction and the finger's line up, and the difference
   // between them collapses to nothing — normalising that gave the ring coordinates that are not numbers, and
@@ -550,8 +561,8 @@ function placeOn(holder, finger, pts, W, m, palm, dt) {
   zAxis.normalize();
   const xAxis = new THREE.Vector3().crossVectors(axis, zAxis).normalize();
   const quat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, axis, zAxis));
-  window.__tryon.fit = { finger, fingerWidth: +fingerWidth.toFixed(1), knob: +state.fit.toFixed(3),
-                         offset: [Math.round(state.offset.x), Math.round(state.offset.y)] };
+  window.__tryon.fit = { finger, fingerWidth: +fingerWidth.toFixed(1), auto: +ratio.toFixed(3), knob: +state.fit.toFixed(3),
+                         offset: [Math.round(state.offset.x), Math.round(state.offset.y)], measured: state.auto.last || null };
   // Long stacks move further up the finger so they do not sink into the knuckle.
   const seg = Math.max(A.distanceTo(B), 1);
   const t = Math.min(0.65, Math.max(RING_POS, 0.3 + ((holder.userData.bandLength || 6) / 2) * scale / seg));
@@ -587,19 +598,41 @@ function placeOn(holder, finger, pts, W, m, palm, dt) {
   return { finger, scale: +f.scale.toFixed(3), facing: +zAxis.z.toFixed(2) };
 }
 
+function takeOff() {
+  arMain.visible = arSecond.visible = false;
+  arMain.userData.pose = arSecond.userData.pose = null;   // next hand starts in place, not flying in
+}
+
+// Returns what the shopper should do: "ok", or the reason the ring is not on ("none", "down", "far",
+// "folded", "short"). The ring is only drawn on a hand it can sit on properly; otherwise it is taken off and
+// the reason is shown, and it comes back by itself once the hand is right again.
 function placeRing(srcW, srcH) {
   const hand = state.hand;
   const now = performance.now();
   const dt = Math.min(0.1, Math.max(0.001, (now - (state.lastPlace || now)) / 1000));
   state.lastPlace = now;
   if (!hand || !srcW || !window.__tryon.built) {
-    arMain.visible = arSecond.visible = false;
-    arMain.userData.pose = arSecond.userData.pose = null;   // next hand starts in place, not flying in
-    state.isRight = undefined; state.handVotes = 0;        // and decides which hand it is from scratch
-    return;
+    takeOff();
+    state.isRight = undefined; state.handVotes = 0;        // decides which hand it is from scratch next time
+    state.upBad = state.farBad = false;
+    return "none";
   }
   const P = mapper(srcW, srcH);
   const pts = hand.lms.map((p) => P(p));
+  // Live video: the hand has to be held the way the guide shows — fingers up and close enough to read.
+  // A ring drawn on a hand hanging down or far away slides about, so it is taken off until the hand is right.
+  // Both checks have a dead band, so a hand at the limit does not make the ring blink.
+  if (state.mode === "live") {
+    const hp = handPose(pts, state.h);
+    if (!state.upBad && hp.up < 0.3) state.upBad = true;
+    else if (state.upBad && hp.up > 0.45) state.upBad = false;
+    window.__tryon.hand = { up: +hp.up.toFixed(2), sizeFrac: +hp.sizeFrac.toFixed(2) };
+    if (state.upBad) {
+      takeOff();
+      window.__tryon.placed = true;
+      return "down";
+    }
+  }
   // Same axes as the stage: x right, y up, z towards the viewer.
   const W = (hand.world || hand.lms).map((p) => new THREE.Vector3(p.x, -p.y, -p.z));
   // test hook: shake the landmarks the way live tracking does, to measure what the smoothing removes
@@ -608,6 +641,18 @@ function placeRing(srcW, srcH) {
   const spacing = (pts[5].distanceTo(pts[9]) + pts[9].distanceTo(pts[13]) + pts[13].distanceTo(pts[17])) / 3;
   const spacing3 = (W[5].distanceTo(W[9]) + W[9].distanceTo(W[13]) + W[13].distanceTo(W[17])) / 3;
   const measure = { spacing2: spacing, spacing: spacing3 };
+  // Too far away: a finger a dozen pixels wide has no edges to size the ring by, and the ring would be a speck.
+  if (state.mode === "live") {
+    const wpx = landmarkWidth(state.finger, pts, measure);
+    if (!state.farBad && wpx < 22) state.farBad = true;
+    else if (state.farBad && wpx > 27) state.farBad = false;
+    window.__tryon.hand.fingerPx = +wpx.toFixed(1);
+    if (state.farBad) {
+      takeOff();
+      window.__tryon.placed = true;
+      return "far";
+    }
+  }
   // Normal of the back of the hand. The handedness label is unreliable on photos, so decide by anatomy:
   // the thumb and curled fingertips sit on the palm side of the wrist–knuckle plane.
   const raw = W[5].clone().sub(W[0]).cross(W[17].clone().sub(W[0])).normalize();
@@ -662,8 +707,9 @@ function placeRing(srcW, srcH) {
   };
   const reliable = (f) => W[FINGERS[f][0]].distanceTo(W[FINGERS[f][1]]) > spacing3 * 0.45 && straight(f);
   const debug = { handed: hand.handed, isRight: state.isRight, vote: +v.toFixed(2), nz: +palm.z.toFixed(2), world: !!hand.world };
+  let status = "ok";
   if (reliable(state.finger)) {
-    debug.main = placeOn(arMain, state.finger, pts, W, measure, palm, dt);
+    debug.main = placeOn(arMain, state.finger, pts, W, measure, palm, dt, autoRatio(srcW, srcH, pts, measure));
     state.badFinger = 0;
   } else {
     // Hold the last pose for a blink — a single bad frame should not make the ring flicker — then take it off
@@ -673,7 +719,7 @@ function placeRing(srcW, srcH) {
     arMain.visible = !!hold;
     arSecond.visible = arSecond.visible && !!hold;
     debug.main = hold ? "held" : "finger-folded";
-    if (!hold && state.mode === "live") setHint(straight(state.finger) ? "Show the back of your hand" : "Straighten the finger you are trying on");
+    if (!hold) status = straight(state.finger) ? "short" : "folded";
   }
   window.__tryon.landmarks = pts.map((p) => [+p.x.toFixed(1), +(-p.y).toFixed(1)]);   // stage pixels, y down
   if (state.hasSecond && reliable(NEIGHBOR[state.finger])) {
@@ -683,6 +729,61 @@ function placeRing(srcW, srcH) {
   }
   window.__tryon.placed = true;
   window.__tryon.debug = debug;
+  return status;
+}
+
+/* How wide the finger looks in the picture, against the landmark estimate. Read once per tracker result on
+   live video and smoothed, so the ring's size settles instead of hopping; read once per photo. A reading the
+   cuts do not agree on is dropped, and after 1.5 s without one the correction fades back to the landmarks. */
+function autoRatio(srcW, srcH, pts, measure) {
+  const a = state.auto, now = performance.now();
+  const live = state.mode === "live";
+  if (live ? a.lastTick === state.lastDetect : a.photoDone) return a.ratio;
+  if (live) a.lastTick = state.lastDetect; else a.photoDone = true;
+  const { sc } = frameFitInfo(srcW, srcH);
+  const prior = landmarkWidth(state.finger, pts, measure) / sc;          // in source pixels
+  const src = live ? video : photo;
+  const r = measureFingerWidth(src, state.hand.lms, srcW, srcH, state.finger, prior, { canvas: probe, ctx: probeCtx });
+  if (r) {
+    const target = THREE.MathUtils.clamp(r.ratio, 0.7, 1.35);
+    a.ratio = live ? a.ratio + (target - a.ratio) * 0.3 : target;
+    a.lastGood = now;
+    a.last = { width: +r.width.toFixed(1), prior: +prior.toFixed(1), ratio: +r.ratio.toFixed(3), cuts: r.cuts, assumed: r.assumed };
+    if (SHOW_EDGES) {
+      const P = mapper(srcW, srcH);
+      window.__tryon.edges = r.edges.map(([x, y]) => { const q = P({ x: x / srcW, y: y / srcH, z: 0 }); return [q.x, q.y]; });
+    }
+  } else if (live && now - a.lastGood > 1500) {
+    a.ratio += (1 - a.ratio) * 0.05;
+  } else if (!live) {
+    a.ratio = 1;
+    a.last = null;
+    window.__tryon.edges = null;
+  }
+  return a.ratio;
+}
+
+/* What the stage says over the picture: the hand outline while there is no usable hand, a one-line hint when
+   the hand is there but not right, nothing while the ring is on. */
+const GUIDE_TEXT = {
+  none: "Show your left or right hand to the camera.\nKeep your fingers pointing up.",
+  down: "Turn your hand so your fingers point up\nto try the ring on.",
+  capture: "Hold your hand like this,\nthen press the round button."
+};
+const HINT_TEXT = {
+  far: "Move your hand a little closer to the camera",
+  folded: "Straighten the finger you are trying on",
+  short: "Show the back of your hand, fingers up"
+};
+function showGuide(status) {
+  const guide = $("guide");
+  const outline = status in GUIDE_TEXT;
+  guide.hidden = !outline;
+  if (outline) $("guide-text").textContent = GUIDE_TEXT[status];
+  if (state.mode === "live") setHint(HINT_TEXT[status] || "");
+  else if (!state.capturing) setHint(status === "ok" ? "Drag the ring · pinch to resize" : HINT_TEXT[status] || hint.textContent);
+  state.pose = status;
+  window.__tryon.pose = status;
 }
 
 /* ---------- sources ---------- */
@@ -723,6 +824,8 @@ async function loadPhoto(src) {
   $("photo-intro").hidden = true;
   arMain.visible = arSecond.visible = false;
   state.hand = null;
+  state.auto.photoDone = false;
+  state.auto.ratio = 1;
   resetAdjust();
   setHint("Finding your hand…");
   photo.src = src;
@@ -730,7 +833,7 @@ async function loadPhoto(src) {
   const lm = await getLandmarker("IMAGE").catch(() => null);
   if (!lm) return;
   const found = onResult(lm.detect(photo), false);
-  setHint(found ? "Drag the ring · pinch to resize" : "No hand found — try a photo with the back of the hand");
+  setHint(found ? "Drag the ring · pinch to resize" : "No hand found — try a photo with the back of the hand, fingers up");
 }
 
 $("file").onchange = (e) => {
@@ -750,7 +853,8 @@ $("intro-camera").onclick = async () => {
   video.hidden = false;
   $("shot").hidden = false;
   $("flip").hidden = false;
-  setHint("Hold your hand as shown, then press the big round button");
+  setHint("");
+  showGuide("capture");
   stage.classList.add("capturing");
   stopCamera();
   try {
@@ -761,6 +865,7 @@ $("intro-camera").onclick = async () => {
     state.capturing = false;
     video.hidden = true;
     stage.classList.remove("capturing");
+    $("guide").hidden = true;
     $("photo-intro").hidden = false;
     setHint("Camera blocked — choose a photo from the gallery");
     return;
@@ -780,6 +885,7 @@ function grabFrame() {
   if (state.facing === "user") { g.translate(w, 0); g.scale(-1, 1); }   // keep the picture she was looking at
   g.drawImage(video, 0, 0, w, h);
   state.capturing = false;
+  $("guide").hidden = true;
   stopCamera();
   video.hidden = true;
   stage.classList.remove("mirror", "capturing");
@@ -799,10 +905,14 @@ async function setMode(mode) {
   $("photo-intro").hidden = true;
   state.capturing = false;
   stage.classList.remove("capturing");
+  $("guide").hidden = true;
   controls.enabled = mode === "3d";   // in try-on a drag moves the ring, it does not orbit the camera
   resetAdjust();
-  $("fit").hidden = !ar;
+  state.auto = { ratio: 1, lastGood: 0, lastTick: -1, photoDone: false };
+  state.upBad = state.farBad = false;
   if (mode !== "live") stopCamera();
+  state.tracking = false;
+  state.pose = "none";
   if (mode !== "photo") photo.hidden = true;
   arMain.visible = arSecond.visible = false;
   arMain.userData.pose = arSecond.userData.pose = null;
@@ -962,12 +1072,15 @@ function step() {
       state.lastVideoTime = video.currentTime;
       state.lastDetect = performance.now();
       const seen = onResult(state.landmarker.detectForVideo(video, performance.now()), true);
-      if (seen) setHint("");
-      else if (performance.now() - state.lastSeen > 400) { state.hand = null; setHint("Show the back of your hand"); }
+      if (!seen && performance.now() - state.lastSeen > 400) state.hand = null;
+      state.tracking = true;
     }
     const srcW = state.mode === "live" ? video.videoWidth : photo.naturalWidth;
     const srcH = state.mode === "live" ? video.videoHeight : photo.naturalHeight;
-    placeRing(srcW, srcH);
+    const status = placeRing(srcW, srcH);
+    // the guide and hints follow the hand; while framing a photo the guide just shows the pose to hold
+    if (state.capturing) { if (state.pose !== "capture") showGuide("capture"); }
+    else if (state.mode === "live" ? state.tracking : state.hand) { if (status !== state.pose) showGuide(status); }
     renderer.render(arScene, arCam);
   }
   window.__tryon.ready = true;

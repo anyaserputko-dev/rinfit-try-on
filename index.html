@@ -48,9 +48,13 @@ button:focus-visible,a:focus-visible,label:focus-within{outline:2px solid var(--
 .fingers{display:flex;gap:4px;background:rgba(255,255,255,.88);backdrop-filter:blur(8px);border-radius:999px;padding:4px;overflow-x:auto}
 .fingers button{border:0;background:transparent;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:600;white-space:nowrap}
 .fingers button[aria-pressed="true"]{background:var(--warm);box-shadow:inset 0 0 0 1px var(--ink)}
-.fit{position:absolute;z-index:5;right:12px;bottom:66px;display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.88);backdrop-filter:blur(8px);border-radius:999px;padding:4px;box-shadow:0 1px 8px rgba(0,0,0,.08)}
-.fit button{border:0;background:transparent;border-radius:50%;width:30px;height:30px;font-size:17px;font-weight:600;line-height:1;display:grid;place-items:center}
-.fit b{font-size:12px;font-weight:600;min-width:42px;text-align:center;color:var(--ink-2)}
+/* the hand outline over the camera: how to hold the hand, shown until a usable hand is in the frame */
+.guide{position:absolute;z-index:4;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:56px 16px 96px;pointer-events:none;color:#fff}
+.guide svg{width:min(48%,230px);height:auto;max-height:55%;filter:drop-shadow(0 0 2px rgba(0,0,0,.55)) drop-shadow(0 2px 10px rgba(0,0,0,.35));opacity:.92}
+.guide .hand{stroke-dasharray:9 7;animation:guide-dash 1.6s linear infinite}
+.guide .ring{stroke:var(--gold);stroke-width:3.5}
+.guide p{margin:0;background:rgba(17,17,17,.78);color:#fff;font-size:14px;line-height:1.45;padding:10px 16px;border-radius:16px;text-align:center;white-space:pre-line;max-width:320px}
+@keyframes guide-dash{to{stroke-dashoffset:-32}}
 /* the photo a shopper keeps: their hand, the ring, and whose ring it is */
 .shot-card{position:absolute;z-index:7;inset:0;background:rgba(17,17,17,.82);backdrop-filter:blur(6px);display:grid;grid-template-rows:minmax(0,1fr) auto;gap:10px;padding:12px}
 .shot-card img{width:100%;height:100%;object-fit:contain;border-radius:6px;min-height:0}
@@ -142,10 +146,13 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
       <button id="mode-photo" aria-pressed="false">Photo</button>
     </div>
     <div class="hint" id="hint">Drag to rotate the ring</div>
-    <div class="fit" id="fit" role="group" aria-label="Ring size on screen" hidden>
-      <button id="fit-down" aria-label="Smaller ring">−</button>
-      <b id="fit-value">100%</b>
-      <button id="fit-up" aria-label="Bigger ring">+</button>
+    <div class="guide" id="guide" hidden aria-live="polite">
+      <svg viewBox="0 0 200 270" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path class="hand" d="M66 262V178L24 132a12 12 0 0 1 16-16l26 34V52a12 12 0 0 1 24 0v80h6V30a12 12 0 0 1 24 0v102h6V44a12 12 0 0 1 24 0v92h6V76a10 10 0 0 1 20 0v186"/>
+        <ellipse class="ring" cx="138" cy="112" rx="15" ry="6"/>
+      </svg>
+      <p id="guide-text">Show your left or right hand to the camera.
+Keep your fingers pointing up.</p>
     </div>
     <div class="bar">
       <div class="fingers" role="group" aria-label="Finger" id="fingers">
@@ -225,7 +232,7 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
       <p class="label">Choose a ring</p>
       <div class="grid" id="grid"></div>
     </div>
-    <p class="note">Everything runs on the device: the camera image never leaves the phone. Hold your hand 30–50 cm from the camera, back of the hand towards the lens.</p>
+    <p class="note">Everything runs on the device: the camera image never leaves the phone. Show either hand, fingers up, 30–50 cm from the camera — the ring sizes itself to your finger.</p>
   </aside>
 </main>
 
@@ -234,7 +241,7 @@ footer{max-width:1320px;margin:0 auto;padding:18px clamp(16px,4vw,40px) 36px;fon
   <p>One button on the product page. No app to install, no upload — the try-on opens right under the photos and keeps the chosen color and size in sync with the cart.</p>
   <ol class="steps">
     <li><b>“Try it on” next to the photos</b>Shown on every ring page, on phones and desktop.</li>
-    <li><b>Camera or a photo of your hand</b>The ring snaps to the chosen finger and follows the hand in real time.</li>
+    <li><b>Camera or a photo of your hand</b>An outline shows how to hold the hand; the ring snaps to the chosen finger, sizes itself to it and follows the hand in real time.</li>
     <li><b>Switch colors, then add to cart</b>Colors and styles change instantly, so the shopper compares before buying.</li>
   </ol>
 </section>
