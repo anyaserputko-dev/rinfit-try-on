@@ -264,10 +264,14 @@ function addToAr(holder, piece) {
   // band's ends stick out past the silhouette or eats the band where it crosses the top of the finger.
   occluder.scale.set(1, 1, 0.85);
   occluder.renderOrder = -1;
+  // How wide the band is across the finger, outer edge to outer edge (ring axis is Y, the stone rides +Z),
+  // in the ring's OWN units. Measured before the ring goes onto the holder: Box3 reads world matrices, and
+  // the holder still carries the previous ring's pose — its size and tilt — so measuring after attaching
+  // made every ring after the first come out a fraction of its size (29.09: Princess 1.49 instead of 2.35).
+  piece.group.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(piece.group);
   holder.add(occluder, piece.group);
   holder.userData.bandLength = piece.bandLength;
-  // how wide the band is across the finger, outer edge to outer edge (ring axis is Y, the stone rides +Z)
-  const box = new THREE.Box3().setFromObject(piece.group);
   holder.userData.outerX = box.isEmpty() ? INNER_RADIUS * 2 * 1.25 : box.max.x - box.min.x;
 }
 
