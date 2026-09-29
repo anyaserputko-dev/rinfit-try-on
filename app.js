@@ -13,7 +13,24 @@ const FINGERS = { index: [5, 6, 1.05], middle: [9, 10, 1.07], ring: [13, 14, 1.0
 // where the second ring of a set goes
 const NEIGHBOR = { index: "middle", middle: "ring", ring: "middle", pinky: "ring" };
 const RING_POS = +(new URLSearchParams(location.search).get("fitpos") ?? 0.42);   // between knuckle and middle joint
-const SMOOTH = 0.5;       // landmark smoothing for live video
+// Landmark filtering for live video: a One Euro filter (Casiez et al., CHI 2012). A fixed blend either
+// shivers on a still hand or trails a moving one; this one smooths hard when the hand is still and lets go
+// as it moves, so the ring is steady in place and still keeps up. Cut-offs in Hz, speeds in frame units/s.
+const EURO_2D = { min: 1.2, beta: 30, d: 1.0 };
+const EURO_3D = { min: 1.5, beta: 6, d: 1.0 };
+function euro(prev, x, t, cfg) {
+  if (!prev) return { x, dx: 0, t };
+  const dt = Math.max(1e-3, t - prev.t);
+  const a = (cutoff) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
+  const dxRaw = (x - prev.x) / dt;
+  const dx = prev.dx + a(cfg.d) * (dxRaw - prev.dx);
+  const cutoff = cfg.min + cfg.beta * Math.abs(dx);
+  return { x: prev.x + a(cutoff) * (x - prev.x), dx, t };
+}
+// How far ahead to draw the hand. The video on screen is always the newest frame, the landmarks are from the
+// last one the tracker finished; carrying them forward by their own velocity closes most of that gap.
+const LEAN_BASE = +(new URLSearchParams(location.search).get("tilt") ?? 0.28);
+const LEAD_MAX = +(new URLSearchParams(location.search).get("lead") ?? 0.1), LEAD_K = 0.85;
 const OUTER_K = +(new URLSearchParams(location.search).get("outer") ?? 1.08);   // band outer width / finger width
 
 const $ = (id) => document.getElementById(id);
@@ -25,7 +42,7 @@ const state = {
   ring: RINGS.find((r) => r.id === params.get("ring")) || RINGS.find((r) => r.id === "emerald") || RINGS[0],
   color: null, finger: params.get("finger") || "ring", mode: "3d", facing: "user",
   stream: null, landmarker: null, lmMode: null, hand: null, lastSeen: 0, lastVideoTime: -1, lastDetect: 0,
-  w: 0, h: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }, capturing: false,
+  w: 0, h: 0, detectGap: 30, detectMs: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }, capturing: false,
   // what the picture says about the finger's width, on top of the landmark estimate (1 = trust the landmarks)
   auto: { ratio: 1, lastGood: 0, lastTick: -1, photoDone: false }, pose: "none", upBad: false, farBad: false
 };
@@ -491,17 +508,36 @@ function pickHand(result, live) {
 function onResult(result, live) {
   const hand = pickHand(result, live);
   if (!hand) return false;
+  const t = performance.now() / 1000;
+  const copy = (l) => l.map((p) => ({ x: p.x, y: p.y, z: p.z }));
   if (live && state.hand && state.hand.handed === hand.handed && performance.now() - state.lastSeen < 300) {
-    const blend = (prev, next) => prev.map((p, i) => {
-      const q = next[i];
-      return { x: p.x + (q.x - p.x) * SMOOTH, y: p.y + (q.y - p.y) * SMOOTH, z: p.z + (q.z - p.z) * SMOOTH };
+    const filter = (key, next, cfg) => {
+      const fs = state.hand[key + "F"] || (state.hand[key + "F"] = []);
+      return next.map((q, i) => {
+        const f = fs[i] || (fs[i] = {});
+        f.x = euro(f.x, q.x, t, cfg); f.y = euro(f.y, q.y, t, cfg); f.z = euro(f.z, q.z, t, cfg);
+        return { x: f.x.x, y: f.y.x, z: f.z.x };
+      });
+    };
+    const before = state.hand.lms;
+    state.hand.lms = filter("lms", hand.lms, EURO_2D);
+    if (hand.world) state.hand.world = filter("world", hand.world, EURO_3D);
+    // velocity of the filtered hand, for drawing it where it is now rather than where it was
+    const dtv = Math.max(1e-3, t - (state.hand.t || t));
+    state.hand.vel = state.hand.lms.map((p, i) => {
+      const v0 = state.hand.vel?.[i] || { x: 0, y: 0 };
+      const vx = (p.x - before[i].x) / dtv, vy = (p.y - before[i].y) / dtv;
+      return { x: v0.x + (vx - v0.x) * 0.6, y: v0.y + (vy - v0.y) * 0.6 };
     });
-    state.hand.lms = blend(state.hand.lms, hand.lms);
-    if (state.hand.world && hand.world) state.hand.world = blend(state.hand.world, hand.world);
   } else {
-    const copy = (l) => l.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-    state.hand = { lms: copy(hand.lms), world: hand.world ? copy(hand.world) : null, handed: hand.handed };
+    state.hand = { lms: copy(hand.lms), world: hand.world ? copy(hand.world) : null, handed: hand.handed,
+                   vel: hand.lms.map(() => ({ x: 0, y: 0 })) };
+    if (live) {
+      state.hand.lmsF = hand.lms.map((q) => ({ x: euro(null, q.x, t), y: euro(null, q.y, t), z: euro(null, q.z, t) }));
+      if (hand.world) state.hand.worldF = hand.world.map((q) => ({ x: euro(null, q.x, t), y: euro(null, q.y, t), z: euro(null, q.z, t) }));
+    }
   }
+  state.hand.t = t;
   state.lastSeen = performance.now();
   return true;
 }
@@ -551,7 +587,11 @@ function placeOn(holder, finger, pts, W, m, palm, dt, ratio = 1) {
   const flat = new THREE.Vector3(B.x - A.x, B.y - A.y, 0);
   const seen = flat.length() || 1;
   const spanW = W[ib].clone().sub(W[ia]);
-  const sinLean = spanW.length() > 1e-6 ? THREE.MathUtils.clamp(-spanW.z / spanW.length(), -0.6, 0.6) : 0;
+  // A hand held up to a phone or laptop camera always has its fingers leaning back a little, which is why a
+  // real band shows as a gentle curve round the finger. The tracker's depth reads that lean as ~0 on a flat
+  // hand, and a band seen dead side-on is a flat strip that looks stuck on. A small baseline lean restores it.
+  const leanW = spanW.length() > 1e-6 ? -spanW.z / spanW.length() : 0;
+  const sinLean = THREE.MathUtils.clamp(leanW + LEAN_BASE, -0.6, 0.6);
   const axis = new THREE.Vector3(flat.x, flat.y, seen * sinLean / Math.sqrt(1 - sinLean * sinLean)).normalize();
   // Size: the landmark estimate, corrected by how wide the finger actually looks in the picture (fit.js),
   // and on a photo by the shopper's pinch.
@@ -595,8 +635,9 @@ function placeOn(holder, finger, pts, W, m, palm, dt, ratio = 1) {
     const speed = move / Math.max(dt, 0.001);                    // stage pixels per second
     const rate = (base, k) => 1 - Math.exp(-dt * (base + speed * k));
     // dead zones: below these the tracker is only breathing, and a ring that answers it never looks pinned
-    if (move > 0.5) f.pos.lerp(pos, rate(7, 0.05));
-    if (f.quat.angleTo(quat) > 0.009) f.quat.slerp(quat, rate(6, 0.04));       // ~0.5 degrees
+    // the landmarks are already filtered (One Euro), so this only takes off the last shimmer
+    if (move > 0.35) f.pos.lerp(pos, rate(30, 0.2));
+    if (f.quat.angleTo(quat) > 0.009) f.quat.slerp(quat, rate(18, 0.1));       // ~0.5 degrees
     if (Math.abs(scale - f.scale) > f.scale * 0.006) {
       f.scale += (scale - f.scale) * rate(3, 0.01);              // size changes slowest: the most visible wobble
     }
@@ -605,6 +646,7 @@ function placeOn(holder, finger, pts, W, m, palm, dt, ratio = 1) {
   holder.quaternion.copy(f.quat);
   holder.scale.setScalar(f.scale);
   holder.visible = true;
+  if (holder === arMain) window.__tryon.ring = { x: f.pos.x, y: -f.pos.y, t, width: fingerWidth };   // stage px, y down (tests)
   return { finger, scale: +f.scale.toFixed(3), facing: +zAxis.z.toFixed(2) };
 }
 
@@ -628,7 +670,8 @@ function placeRing(srcW, srcH) {
     return "none";
   }
   const P = mapper(srcW, srcH);
-  const pts = hand.lms.map((p) => P(p));
+  const lead = state.mode === "live" && hand.vel ? Math.min(LEAD_MAX, Math.max(0, (now / 1000) - hand.t)) * LEAD_K : 0;
+  const pts = hand.lms.map((p, i) => P(lead ? { x: p.x + hand.vel[i].x * lead, y: p.y + hand.vel[i].y * lead, z: p.z } : p));
   // Live video: the hand has to be held the way the guide shows — fingers up and close enough to read.
   // A ring drawn on a hand hanging down or far away slides about, so it is taken off until the hand is right.
   // Both checks have a dead band, so a hand at the limit does not make the ring blink.
@@ -733,7 +776,13 @@ function placeRing(srcW, srcH) {
   }
   window.__tryon.landmarks = pts.map((p) => [+p.x.toFixed(1), +(-p.y).toFixed(1)]);   // stage pixels, y down
   if (state.hasSecond && reliable(NEIGHBOR[state.finger])) {
-    debug.second = placeOn(arSecond, NEIGHBOR[state.finger], pts, W, measure, palm, dt);
+    // same hand, same camera: the correction read on the main finger holds for its neighbour too, otherwise
+    // the two rings of a set come out in different sizes
+    // the neighbour is read on its own: a middle finger is not the ring finger scaled up, and sizing it off
+    // the landmark estimate alone made the second ring of a set a size too big
+    const nb = NEIGHBOR[state.finger];
+    if (state.auto2?.finger !== nb) state.auto2 = { finger: nb, ratio: state.auto.ratio, lastGood: 0, lastTick: -1, photoDone: false };
+    debug.second = placeOn(arSecond, nb, pts, W, measure, palm, dt, autoRatio(srcW, srcH, pts, measure, nb, state.auto2));
   } else if (!state.hasSecond) {
     arSecond.visible = false;
   }
@@ -745,27 +794,42 @@ function placeRing(srcW, srcH) {
 /* How wide the finger looks in the picture, against the landmark estimate. Read once per tracker result on
    live video and smoothed, so the ring's size settles instead of hopping; read once per photo. A reading the
    cuts do not agree on is dropped, and after 1.5 s without one the correction fades back to the landmarks. */
-function autoRatio(srcW, srcH, pts, measure) {
-  const a = state.auto, now = performance.now();
+function autoRatio(srcW, srcH, pts, measure, finger = state.finger, a = state.auto) {
+  const now = performance.now();
   const live = state.mode === "live";
   if (live ? a.lastTick === state.lastDetect : a.photoDone) return a.ratio;
   if (live) a.lastTick = state.lastDetect; else a.photoDone = true;
   const { sc } = frameFitInfo(srcW, srcH);
-  const prior = landmarkWidth(state.finger, pts, measure) / sc;          // in source pixels
+  const prior = landmarkWidth(finger, pts, measure) / sc;          // in source pixels
+  // A finger in motion is blurred, and the frame being read may already be a step ahead of the landmarks:
+  // the cuts then land beside the finger and read it far too thin — that is what shrank the ring to half
+  // size on a moving hand. Only read a hand that is (nearly) still; otherwise keep what we have.
+  const [ia] = FINGERS[finger];
+  const v = state.hand.vel?.[ia];
+  const speed = v ? Math.hypot(v.x * srcW, v.y * srcH) / Math.max(prior, 1) : 0;   // finger widths per second
+  if (live && speed > 1.2) return a.ratio;
   const src = live ? video : photo;
-  const r = measureFingerWidth(src, state.hand.lms, srcW, srcH, state.finger, prior, { canvas: probe, ctx: probeCtx });
+  const r = measureFingerWidth(src, state.hand.lms, srcW, srcH, finger, prior, { canvas: probe, ctx: probeCtx });
+  // The landmark estimate is right to about ±10 % on real hands (checked on every test photo); the picture
+  // only fine-tunes it. A reading far outside that band is the reader being fooled — a knuckle crease, a
+  // shadow, motion blur — not a finger half as wide, so it is bounded tightly and never followed alone:
+  // the size is the median of the last good readings.
+  const LO = live ? 0.88 : 0.8, HI = live ? 1.15 : 1.25;
   if (r) {
-    const target = THREE.MathUtils.clamp(r.ratio, 0.6, 1.25);
-    a.ratio = live ? a.ratio + (target - a.ratio) * 0.3 : target;
+    a.hist = (a.hist || []).concat(THREE.MathUtils.clamp(r.ratio, LO, HI)).slice(-9);
+    const sorted = [...a.hist].sort((x, y) => x - y);
+    const target = sorted[sorted.length >> 1];
+    a.ratio = live ? a.ratio + (target - a.ratio) * 0.35 : target;
     a.lastGood = now;
-    a.last = { width: +r.width.toFixed(1), prior: +prior.toFixed(1), ratio: +r.ratio.toFixed(3), cuts: r.cuts, assumed: r.assumed,
-               how: r.how };
-    if (SHOW_EDGES) {
+    a.last = { width: +r.width.toFixed(1), prior: +prior.toFixed(1), ratio: +r.ratio.toFixed(3), used: +target.toFixed(3),
+               n: a.hist.length, cuts: r.cuts, assumed: r.assumed, how: r.how };
+    if (SHOW_EDGES && a === state.auto) {
       const P = mapper(srcW, srcH);
       window.__tryon.edges = r.edges.map(([x, y]) => { const q = P({ x: x / srcW, y: y / srcH, z: 0 }); return [q.x, q.y]; });
     }
-  } else if (live && now - a.lastGood > 1500) {
+  } else if (live && now - a.lastGood > 2500) {
     a.ratio += (1 - a.ratio) * 0.05;
+    if (Math.abs(a.ratio - 1) < 0.01) a.hist = [];
   } else if (!live) {
     a.ratio = 1;
     a.last = { width: null, prior: +prior.toFixed(1) };
@@ -836,7 +900,7 @@ async function loadPhoto(src) {
   arMain.visible = arSecond.visible = false;
   state.hand = null;
   state.auto.photoDone = false;
-  state.auto.ratio = 1;
+  state.auto.ratio = 1; state.auto.hist = []; state.auto2 = null;
   resetAdjust();
   setHint("Finding your hand…");
   photo.src = src;
@@ -919,7 +983,7 @@ async function setMode(mode) {
   $("guide").hidden = true;
   controls.enabled = mode === "3d";   // in try-on a drag moves the ring, it does not orbit the camera
   resetAdjust();
-  state.auto = { ratio: 1, lastGood: 0, lastTick: -1, photoDone: false };
+  state.auto = { ratio: 1, lastGood: 0, lastTick: -1, photoDone: false }; state.auto2 = null;
   state.upBad = state.farBad = false;
   if (mode !== "live") stopCamera();
   state.tracking = false;
@@ -1076,13 +1140,20 @@ function step() {
     controls.update();
     renderer.render(viewScene, viewCam);
   } else {
-    // Track at ~20 Hz, draw at screen rate: hand tracking on every frame starves the preview on a phone,
-    // and the ring keeps following the hand from the smoothed landmarks in between.
+    // Track every new camera frame when the device keeps up (the gap adapts to how long tracking takes), draw
+    // at screen rate; in between, the ring follows the hand carried forward by its own velocity.
     if (state.mode === "live" && state.landmarker && state.lmMode === "VIDEO" && video.readyState >= 2
-        && video.currentTime !== state.lastVideoTime && performance.now() - state.lastDetect > 45) {
+        && video.currentTime !== state.lastVideoTime && performance.now() - state.lastDetect > state.detectGap) {
       state.lastVideoTime = video.currentTime;
       state.lastDetect = performance.now();
-      const seen = onResult(state.landmarker.detectForVideo(video, performance.now()), true);
+      const res = state.landmarker.detectForVideo(video, performance.now());
+      // Track every new camera frame when the device keeps up; back off on a slow phone so the preview
+      // does not starve. The gap follows how long tracking actually takes here.
+      const took = performance.now() - state.lastDetect;
+      state.detectMs = state.detectMs ? state.detectMs * 0.9 + took * 0.1 : took;
+      state.detectGap = state.detectMs < 14 ? 0 : Math.min(45, state.detectMs * 1.3);
+      window.__tryon.detectMs = +state.detectMs.toFixed(1);
+      const seen = onResult(res, true);
       if (!seen && performance.now() - state.lastSeen > 400) state.hand = null;
       state.tracking = true;
     }
