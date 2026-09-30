@@ -42,7 +42,7 @@ const state = {
   ring: RINGS.find((r) => r.id === params.get("ring")) || RINGS.find((r) => r.id === "emerald") || RINGS[0],
   color: null, finger: params.get("finger") || "ring", mode: "3d", facing: "user",
   stream: null, landmarker: null, lmMode: null, hand: null, lastSeen: 0, lastVideoTime: -1, lastDetect: 0,
-  w: 0, h: 0, detectGap: 30, detectMs: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }, capturing: false,
+  w: 0, h: 0, panX: 0.5, panShown: 0.5, detectGap: 30, detectMs: 0, hasSecond: false, viewCount: 0, buildToken: 0, offset: { x: 0, y: 0 }, capturing: false,
   // what the picture says about the finger's width, on top of the landmark estimate (1 = trust the landmarks)
   auto: { ratio: 1, lastGood: 0, lastTick: -1, photoDone: false }, pose: "none", upBad: false, farBad: false
 };
@@ -551,7 +551,33 @@ function onResult(result, live) {
 const fitMode = () => (state.mode === "photo" ? "contain" : "cover");
 function frameFitInfo(srcW, srcH) {
   const sc = fitMode() === "contain" ? Math.min(state.w / srcW, state.h / srcH) : Math.max(state.w / srcW, state.h / srcH);
-  return { sc, ox: (state.w - srcW * sc) / 2, oy: (state.h - srcH * sc) / 2 };
+  const pan = fitMode() === "cover" ? state.panX : 0.5;
+  return { sc, ox: (state.w - srcW * sc) * pan, oy: (state.h - srcH * sc) / 2 };
+}
+
+/* A laptop camera is wide, a phone-shaped stage is narrow: shown "cover", only the middle of the picture is
+   on screen — the face — and a hand raised beside it is tracked but drawn off the stage. So the visible part
+   of the picture follows the hand sideways, gently, and drifts back to the middle when there is no hand.
+   The video's object-position is moved by the same amount, so picture and ring stay locked together. */
+function updatePan(srcW, srcH, dt) {
+  const sc = Math.max(state.w / srcW, state.h / srcH);
+  const spare = srcW * sc - state.w;                        // how much of the picture is cut off, in stage px
+  let target = 0.5;
+  if (spare > 8 && state.hand && performance.now() - state.lastSeen < 1500) {
+    const L = state.hand.lms, hx = [0, 5, 9, 13, 17].reduce((a, i) => a + L[i].x, 0) / 5;
+    const onStage = (state.w - srcW * sc) * state.panX + hx * srcW * sc;   // where the hand is drawn now
+    // only chase a hand that is near or past the edge; one comfortably in view stays put, so the picture
+    // does not swim with every small move
+    if (onStage < state.w * 0.3 || onStage > state.w * 0.7) target = (state.w / 2 - hx * srcW * sc) / (state.w - srcW * sc);
+    else target = state.panX;
+  } else if (spare > 8 && state.hand) target = state.panX;
+  target = Math.min(1, Math.max(0, target));
+  const k = 1 - Math.exp(-dt * 4);
+  state.panX += (target - state.panX) * k;
+  if (Math.abs(state.panX - state.panShown) > 0.002) {
+    state.panShown = state.panX;
+    video.style.objectPosition = `${(state.panX * 100).toFixed(2)}% 50%`;
+  }
 }
 function mapper(srcW, srcH) {
   const { sc, ox, oy } = frameFitInfo(srcW, srcH);
@@ -699,10 +725,14 @@ function placeRing(srcW, srcH) {
   const spacing3 = (W[5].distanceTo(W[9]) + W[9].distanceTo(W[13]) + W[13].distanceTo(W[17])) / 3;
   const measure = { spacing2: spacing, spacing: spacing3 };
   // Too far away: a finger a dozen pixels wide has no edges to size the ring by, and the ring would be a speck.
+  // Judged in CAMERA pixels, not screen pixels: how far the hand is does not change with the size of the
+  // window it is shown in. Measured on screen, a small stage (the phone mock-up in the audit, 240 px wide)
+  // called every hand "too far" and never put a ring on.
   if (state.mode === "live") {
-    const wpx = landmarkWidth(state.finger, pts, measure);
-    if (!state.farBad && wpx < 22) state.farBad = true;
-    else if (state.farBad && wpx > 27) state.farBad = false;
+    const wpx = landmarkWidth(state.finger, pts, measure) / frameFitInfo(srcW, srcH).sc;
+    const near = Math.max(srcW, srcH) / 1280;                 // thresholds are for a 1280-px frame
+    if (!state.farBad && wpx < 24 * near) state.farBad = true;
+    else if (state.farBad && wpx > 29 * near) state.farBad = false;
     window.__tryon.hand.fingerPx = +wpx.toFixed(1);
     if (state.farBad) {
       takeOff();
@@ -973,6 +1003,8 @@ function grabFrame() {
 
 async function setMode(mode) {
   state.mode = mode;
+  state.panX = state.panShown = 0.5;
+  video.style.objectPosition = "50% 50%";
   for (const m of ["3d", "live", "photo"]) $(`mode-${m}`).setAttribute("aria-pressed", String(m === mode));
   const ar = mode !== "3d";
   canvas.classList.toggle("ar", ar);
@@ -1090,7 +1122,8 @@ $("shot").onclick = () => {
     const sc = fitMode() === "contain" ? Math.min(out.width / sw, out.height / sh) : Math.max(out.width / sw, out.height / sh);
     g.save();
     if (stage.classList.contains("mirror")) { g.translate(out.width, 0); g.scale(-1, 1); }
-    g.drawImage(src, (out.width - sw * sc) / 2, (out.height - sh * sc) / 2, sw * sc, sh * sc);
+    const pan = fitMode() === "cover" ? state.panX : 0.5;   // the part of the picture that is on screen
+    g.drawImage(src, (out.width - sw * sc) * pan, (out.height - sh * sc) / 2, sw * sc, sh * sc);
     g.drawImage(canvas, 0, 0);
     g.restore();
   }
@@ -1163,6 +1196,8 @@ function step() {
     }
     const srcW = state.mode === "live" ? video.videoWidth : photo.naturalWidth;
     const srcH = state.mode === "live" ? video.videoHeight : photo.naturalHeight;
+    if (state.mode === "live" && srcW) updatePan(srcW, srcH, Math.min(0.1, (performance.now() - (state.lastPan || performance.now())) / 1000));
+    state.lastPan = performance.now();
     const status = placeRing(srcW, srcH);
     // the guide and hints follow the hand; while framing a photo the guide just shows the pose to hold
     if (state.capturing) { if (state.pose !== "capture") showGuide("capture"); }

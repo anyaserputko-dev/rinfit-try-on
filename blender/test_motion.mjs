@@ -43,7 +43,8 @@ while (Date.now() - t0 < (c.secs || 14) * 1000) {
     const res = window.__gt.detect(s);
     if (!ring || !res.landmarks?.length) return { ring: !!ring, gt: !!res.landmarks?.length };
     const w = st.clientWidth, h = st.clientHeight, sc = Math.max(w / s.width, h / s.height);
-    const ox = (w - s.width * sc) / 2, oy = (h - s.height * sc) / 2;
+    const pan = parseFloat(v.style.objectPosition || "50%") / 100;   // the stage may be panned to the hand
+    const ox = (w - s.width * sc) * pan, oy = (h - s.height * sc) / 2;
     const L = res.landmarks[0], P = (i) => [ox + L[i].x * s.width * sc, oy + L[i].y * s.height * sc];
     const a = P(13), b = P(14);
     const ex = a[0] + (b[0] - a[0]) * ring.t, ey = a[1] + (b[1] - a[1]) * ring.t;
